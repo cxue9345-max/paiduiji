@@ -1,0 +1,18 @@
+# 顶层配置文件：优先使用这里的配置
+# 如果本文件缺失，后端会自动使用内置 default_config.yaml
+# 如果某个参数格式错误/无效，仅该参数回退到内置默认值
+
+port: "8080"
+debug: false
+session_ttl: "180s"
+cleanup_interval: "30s"
+http_timeout: "8s"
+poll_max_retries: 2
+poll_retry_interval: "500ms"
+user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+referer: "https://www.bilibili.com/"
+bili_generate_url: "https://passport.bilibili.com/x/passport-login/web/qrcode/generate?source=main-fe-header"
+bili_poll_url: "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
+redis_addr: ""
+redis_password: ""
+redis_db: 0
