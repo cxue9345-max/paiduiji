@@ -1,3 +1,3 @@
 @echo off
-cd /d ./backend
+cd /d ./services/backend
 start run.bat

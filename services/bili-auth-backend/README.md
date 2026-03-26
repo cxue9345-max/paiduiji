@@ -22,7 +22,7 @@
 ## 目录结构
 
 ```text
-bili-auth-backend/
+services/bili-auth-backend/
 ├── cmd/server/main.go
 ├── internal/handler/auth_handler.go
 ├── internal/httpclient/bilibili_auth_client.go
@@ -47,7 +47,7 @@ bili-auth-backend/
 ## 启动
 
 ```bash
-cd bili-auth-backend
+cd services/bili-auth-backend
 cp .env.example .env
 go mod tidy
 go run ./cmd/server

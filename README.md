@@ -203,11 +203,11 @@ var WX_webhook = ""; // https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
 - 解压后在当前目录打开控制台，执行：
 
 ```bash
-go run ./backend
+go run ./services/backend
 ```
 
 - 默认端口：WebSocket `23333`、配置 API `23334`。
-- 如需改端口，请修改 `backend/main.go` 中 `localWSAddr` / `localAPIAddr`。
+- 如需改端口，请修改 `services/backend/main.go` 中 `localWSAddr` / `localAPIAddr`。
 
 ### 9.3 配置与退出
 
@@ -237,7 +237,7 @@ go run ./backend
 
 ## 11. 其他补充说明
 
-- `WebCT` 目录中的源码说明原文：
+- `services/WebCT` 目录中的源码说明原文：
   - “这是建立一个 ws 服务器，然后被响应，然后才可以的。”
 - `新的myjs替换掉旧的myjs即可完成更新.txt` 与 `改成index点html替换源文件即可.txt` 当前文件内容为空（文件名即说明）。
 
@@ -253,8 +253,7 @@ go run ./backend
 - `安装方法以及更新记录/myjs进阶功能填写方法(只用基础功能不用看).txt`
 - `安装方法以及更新记录/两个网址.txt`
 - `安装方法以及更新记录/新的myjs替换掉旧的myjs即可完成更新.txt`
-- `pdj/dograin/排队姬样式常考/替换教程.txt`
-- `pdj/dograin/排队姬样式常考/改成index点html替换源文件即可.txt`
-- `backend/main.go`
-- `WebCT/源码说明.txt`
-
+- `frontend/dograin/排队姬样式常考/替换教程.txt`
+- `frontend/dograin/排队姬样式常考/改成index点html替换源文件即可.txt`
+- `services/backend/main.go`
+- `services/WebCT/源码说明.txt`

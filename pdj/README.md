@@ -37,7 +37,7 @@
 
 ### 插件目录 
 
-`./dograin`
+`../frontend/dograin`
 
 > 核心实现使用开源项目   https://gitee.com/lazycat-xiao/dograin.git 获取弹幕信息
 
@@ -49,7 +49,7 @@
 
 #### 绑定播间
 
-> 配置文件地址  dograin/myjs.js 首行
+> 配置文件地址  ../frontend/dograin/myjs.js 首行
 
 ```js
 var zroomid =2834474; /*设置直播间房间号*/
