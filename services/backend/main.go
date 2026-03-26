@@ -33,7 +33,7 @@ const (
 	upstreamWSURL = "wss://broadcastlv.chat.bilibili.com/sub"
 )
 
-var configPath = filepath.Join("..", "pdj", "dograin", "pdj_config.json")
+var configPath = filepath.Join("..", "..", "frontend", "dograin", "pdj_config.json")
 
 type Config struct {
 	RoomID int    `json:"roomid"`
