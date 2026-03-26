@@ -108,6 +108,7 @@ jobs:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
 
@@ -124,6 +125,17 @@ jobs:
             echo "VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
           else
             echo "VERSION=${{ inputs.version }}" >> $GITHUB_ENV
+          fi
+
+      - name: Validate release input and assets
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && ! [[ "${{ env.VERSION }}" =~ ^v ]]; then
+            echo "workflow_dispatch 的版本号必须以 v 开头，例如 v1.0.0" >&2
+            exit 1
+          fi
+          if ! ls dist/* >/dev/null 2>&1; then
+            echo "未找到可发布的构建产物（dist/* 为空）" >&2
+            exit 1
           fi
 
       - name: Create GitHub Release
