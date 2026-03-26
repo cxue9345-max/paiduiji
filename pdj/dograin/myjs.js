@@ -67,47 +67,100 @@ super_xinxi_desu = [["一纸轻予梦","喜欢雨露的小青草儿"],[0,0],[0,0
 //-----------------------------------------------------------------------------
 //迷糊uid 629543291 迷糊房间号 26714219 一纸轻予梦的18461303
 // main.js
-var zroomid =26714219;//你的直播间号
-var zuid = 18461303;//你的uid
+var zroomid = 0;//你的直播间号（由配置面板注入）
+var zuid = 0;//你的uid（由配置面板注入）
 var persons =[];
-//新建链接时会自动连接，并自动调用onopen方法
-//var ws = new WebSocket("wss://broadcastlv.chat.bilibili.com/sub");原网址，直连b站
-var ws = new WebSocket ("ws://localhost:23333/danmu/sub");
-ws.onopen = function () {
-    document.getElementById("status").append("已连接");
-    ws.send(encode(JSON.stringify({
-        uid: zuid,
-        roomid: zroomid,
-    }), 7));
+var ws = null;
+var pdjConnected = false;
+
+function PDJ_EmitStatus(status, detail = {}) {
+    window.dispatchEvent(new CustomEvent("pdj:status", {
+        detail: Object.assign({ status: status, roomid: zroomid, uid: zuid }, detail)
+    }));
 }
 
-//{"uid": 0表示未登录，否则为用户ID,"roomid": 房间ID,"protover": 1,"platform": "web","clientver": "1.4.0"}
-//----------//----------//----------//----------//----------
-var shujubaobao; //别动，没有BUG就别动。
-ws.onmessage = async function (msgEvent) {
-    //var read = new FileReader();
-    //read.readAsArrayBuffer(msgEvent.data)//从消息里面拿出数据包，旧版本
-    console.log("[弹幕Json信息]")
-    console.log(msgEvent.data)
+async function PDJ_LoadConfig() {
+    try {
+        var res = await fetch('/api/config');
+        if (!res.ok) {
+            throw new Error('读取配置失败: ' + res.status);
+        }
+        var cfg = await res.json();
+        zroomid = Number(cfg.roomid || 0);
+        zuid = Number(cfg.uid || 0);
+        PDJ_EmitStatus('config_loaded', { config: cfg });
+    } catch (err) {
+        console.error('[PDJ] 配置读取失败', err);
+        PDJ_EmitStatus('config_error', { error: String(err) });
+    }
+}
 
-    shujubaobao = msgEvent.data 
-    jsontoprint(JSON.parse(shujubaobao));//调用下面的函数
-    //之前大佬写的代码移到最后面了[位置编号 00001]
-};
+async function PDJ_Connect() {
+    await PDJ_LoadConfig();
+
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return ws;
+    }
+
+    ws = new WebSocket('ws://localhost:23333/danmu/sub');
+    ws.onopen = function () {
+        pdjConnected = true;
+        document.getElementById("status").textContent = "已连接";
+        PDJ_EmitStatus('connected');
+    };
+
+    ws.onclose = function () {
+        pdjConnected = false;
+        PDJ_EmitStatus('disconnected');
+        setTimeout(function () { PDJ_Connect(); }, 2000);
+    };
+
+    ws.onerror = function (err) {
+        PDJ_EmitStatus('error', { error: String(err) });
+    };
+
+    ws.onmessage = async function (msgEvent) {
+        console.log("[弹幕Json信息]")
+        console.log(msgEvent.data)
+
+        if (typeof msgEvent.data !== 'string') {
+            return;
+        }
+
+        var maybeJson = null;
+        try {
+            maybeJson = JSON.parse(msgEvent.data);
+        } catch (_e) {
+            return;
+        }
+
+        if (maybeJson && maybeJson.type === 'PDJ_STATUS') {
+            PDJ_EmitStatus(maybeJson.status || 'server', maybeJson);
+            return;
+        }
+
+        shujubaobao = msgEvent.data;
+        jsontoprint(maybeJson);//调用下面的函数
+    };
+
+    return ws;
+}
+
+PDJ_Connect();
+
+
+function PDJ_Send(payload) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        console.warn('[PDJ] WS未连接，消息已丢弃', payload);
+        return;
+    }
+    ws.send(payload);
+}
 
 function ws_zbtool_open(){
     const ws_zbtool_url = "http://127.0.0.1:23223"
     var ws_zbtool = new WebSocket(ws_zbtool_url);
     var ShuJu_bag; //别动，没有BUG就别动。
-    //打开链接
-    ws.onopen = function () {
-        document.getElementById("status").append("已连接");
-        ws.send(encode(JSON.stringify({
-            uid: zuid,
-            roomid: zroomid,
-        }), 7));
-    }
-    //
     ws_zbtool.onmessage = async function (msgEvent) {
         console.log("[弹幕Json信息]")
         console.log(msgEvent.data)
@@ -231,7 +284,7 @@ function sendMessage(xz_orz){
     if (fankui == true){
         console.log("排队人员：",xz_orz);
         zspxz_message = xz_orz + ",排上啦~";
-        ws.send(zspxz_message);
+        PDJ_Send(zspxz_message);
     }
 };
 function sendMessage_diy(xz_orz,kind = ",排上啦~"){
@@ -240,7 +293,7 @@ function sendMessage_diy(xz_orz,kind = ",排上啦~"){
     if (fankui == true){
         console.log("排队人员：",xz_orz);
         zspxz_message = xz_orz + massage_xzorz
-        ws.send(zspxz_message)}
+        PDJ_Send(zspxz_message)}
 };
 //输入list，str，如果str包含了list的元素，就会返回布尔值。
 //如果 str = assss，list = ['as','bb']
@@ -460,7 +513,7 @@ function op_quanxian(message){
                     var add_op_message=message.replace("添加管理员 ","");
                     if(add_op_message != ""){
                         admins.push(add_op_message);
-                        //ws.send("添加临时管理:" + add_op_message)
+                        //PDJ_Send("添加临时管理:" + add_op_message)
                         console.log("[本场管理员]:",admins)
                     };
                 };
@@ -472,10 +525,10 @@ function op_quanxian(message){
                         var del_op_index = admins.indexOf(del_op_message);
                         if (del_op_index > -1){
                             admins.splice(del_op_index, 1);
-                            ws.send("临时取消管理:" + del_op_message)
+                            PDJ_Send("临时取消管理:" + del_op_message)
                             console.log("[本场管理员]:",admins)}
                         if(del_op_index == -1){
-                            ws.send("找不到:" + del_op_message)
+                            PDJ_Send("找不到:" + del_op_message)
                             console.error("找不到:" , del_op_message)
                             console.log("[本场管理员]:",admins)}    
                     };
@@ -528,45 +581,45 @@ function op_quanxian(message){
                 //舰长插队开关
                 if(message == "开启舰长插队"){
                     jianzhangchadui = true;
-                    ws.send("OPEN JZCD MOD");
+                    PDJ_Send("OPEN JZCD MOD");
                     console.log("[功能]舰长插队开启");
                 };
                 if(message == "关闭舰长插队"){
                     jianzhangchadui = false;
-                    ws.send("CLOSE JZCD MOD");
+                    PDJ_Send("CLOSE JZCD MOD");
                     console.log("[功能]舰长插队关闭");
                 };
                 //停止排队开关
                 if(message == "暂停排队功能"||message == "关闭自助排队"){
                     all_suoyourenbukepaidui = true;
-                    ws.send("[Msg]排队功能已暂停");
+                    PDJ_Send("[Msg]排队功能已暂停");
                     console.log("[功能]排队功能暂停");
                 };
                 if(message == "恢复排队功能"||message == "恢复自助排队"){
                     all_suoyourenbukepaidui = false;
-                    ws.send("[Msg]排队功能已恢复");
+                    PDJ_Send("[Msg]排队功能已恢复");
                     console.log("[功能]排队功能恢复");
                 };
                 //房管继承制度
                 if(message == "允许房管成为插件管理员"){
                     fangguan_can_doing = true;
-                    //ws.send("[Msg]排队功能已暂停");
+                    //PDJ_Send("[Msg]排队功能已暂停");
                     console.log("[功能]允许房管成为插件管理员");
                 };
                 if(message == "停止房管成为插件管理员"){
                     fangguan_can_doing = false;
-                    //ws.send("[Msg]排队功能已恢复");
+                    //PDJ_Send("[Msg]排队功能已恢复");
                     console.log("[功能]停止房管成为插件管理员");
                 };
                 //未实装 仅粉丝可排队
                 if(message == "开启仅粉丝可排队"){
                     only_myfuns_paidui = true;
-                    ws.send("OPEN OnlyFuns MOD");
+                    PDJ_Send("OPEN OnlyFuns MOD");
                     console.log("[功能]仅粉丝可排队开启");
                 };
                 if(message == "关闭仅粉丝可排队"){
                     only_myfuns_paidui = false;
-                    ws.send("CLOSE OnlyFuns MOD");
+                    PDJ_Send("CLOSE OnlyFuns MOD");
                     console.log("[功能]仅粉丝可排队关闭");
                 };
 
@@ -577,7 +630,7 @@ function op_quanxian(message){
                     var Set_beichadui_MSG = message.replace(/[\d\s]+/g,"");//删除数字和空格
                     if(Set_beichadui_MSG =="设置被插队次数"){
                         jianzhang_cd_cishu = Set_beichadui_QAQ
-                        ws.send("Set Beichadui =" + jianzhang_cd_cishu);
+                        PDJ_Send("Set Beichadui =" + jianzhang_cd_cishu);
                         console.log("[功能]被插队次数调整为",jianzhang_cd_cishu);
                         };
                 };
@@ -590,7 +643,7 @@ function op_quanxian(message){
                     var Set_paidui_max_MSG = message.replace(/[\d\s]+/g,"");//删除数字和空格
                     if(Set_paidui_max_MSG =="设置排队人数"||Set_paidui_max_MSG =="设置排队人数上限"||Set_paidui_max_MSG =="设置排队上限"){
                         paidui_list_length_max = Set_paidui_max_QAQ
-                        ws.send("Set PaiDuimax =" + paidui_list_length_max);
+                        PDJ_Send("Set PaiDuimax =" + paidui_list_length_max);
                         console.log("[功能]排队上限调整为",paidui_list_length_max);
                         };
                 };
@@ -769,9 +822,9 @@ function jsontoprint(data) {
     //            console.log("[case = 1]----------");
     //            if (op == 8) {
     //                console.log('认证成功开始心跳')
-    //                ws.send(encode('[object Object]', 2));
+    //                PDJ_Send(encode('[object Object]', 2));
     //                setInterval(function () {
-    //                    ws.send(encode('[object Object]', 2));
+    //                    PDJ_Send(encode('[object Object]', 2));
     //                }, 30000);
     //            }
     //            else {
