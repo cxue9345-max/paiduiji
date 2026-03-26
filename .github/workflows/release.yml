@@ -65,15 +65,29 @@ jobs:
         run: |
           PKG_NAME="paiduiji-${{ matrix.goos }}-${{ matrix.goarch }}"
           mkdir -p "$PKG_NAME/frontend/dograin/排队姬样式常考/主播定制款"
+          mkdir -p "$PKG_NAME/data/queues"
+          mkdir -p "$PKG_NAME/data/logs"
 
+          # 二进制
           cp services/backend/paiduiji${{ matrix.suffix }} "$PKG_NAME/"
 
+          # 后端配置模板（新版本使用 config.yaml）
+          cat > "$PKG_NAME/config.yaml" <<'EOF'
+listen_addr: :9816
+proxy_target: ""
+data_dir: data
+queue_dir: data/queues
+log_dir: data/logs
+EOF
+
+          # 前端核心文件
           cp frontend/dograin/index.html      "$PKG_NAME/frontend/dograin/"
           cp frontend/dograin/myjs.js         "$PKG_NAME/frontend/dograin/"
           cp frontend/dograin/pako.min.js     "$PKG_NAME/frontend/dograin/"
           cp frontend/dograin/quanxian.js     "$PKG_NAME/frontend/dograin/"
           cp frontend/dograin/obschajian.html "$PKG_NAME/frontend/dograin/"
 
+          # 样式模板
           cp "frontend/dograin/排队姬样式常考/红色.html" \
              "$PKG_NAME/frontend/dograin/排队姬样式常考/"
           cp "frontend/dograin/排队姬样式常考/主播定制款/Misaka_千岁.html" \
@@ -83,6 +97,7 @@ jobs:
           cp "frontend/dograin/排队姬样式常考/主播定制款/迷糊的迷糊菇.html" \
              "$PKG_NAME/frontend/dograin/排队姬样式常考/主播定制款/"
 
+          # 前端直播间配置模板（bilibili roomid/uid/cookie）
           cat > "$PKG_NAME/frontend/dograin/pdj_config.json" <<'EOF'
 {
   "roomid": 0,
@@ -91,25 +106,31 @@ jobs:
 }
 EOF
 
+          # 使用说明
           cat > "$PKG_NAME/README.txt" <<'EOF'
 排队姬 启动说明
 ================
 
-1. 填写配置
+1. 填写直播间配置
    打开 frontend/dograin/pdj_config.json
    填入你的直播间 roomid、uid 和 cookie
 
-2. 启动程序
+2. 按需修改后端配置（可选）
+   打开 config.yaml 可调整端口、数据目录等
+   默认端口 9816，数据存在 data/ 目录下
+
+3. 启动程序
    直接运行同目录下的 paiduiji 可执行文件
    （Windows 用户双击 paiduiji.exe）
 
-3. 访问地址
+4. 访问地址
    配置面板：http://localhost:9816
+   队列展示：http://localhost:9816/b
    OBS 浏览器源：http://localhost:9816/dograin/obschajian.html
 
-环境变量（可选）
-   PDJ_STATIC_DIR  前端静态文件目录，默认为程序同级的 frontend/dograin
-   PDJ_CONFIG_PATH 配置文件路径，默认为静态目录下的 pdj_config.json
+环境变量（可选，优先级高于 config.yaml）
+   PDJ_CONFIG_PATH  后端配置文件路径，默认为程序同级的 config.yaml
+   PDJ_STATIC_DIR   前端静态文件目录，默认为程序同级的 frontend/dograin
 EOF
 
           echo "PKG_NAME=$PKG_NAME" >> $GITHUB_ENV
