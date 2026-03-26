@@ -87,6 +87,16 @@ func (s *Service) Poll(ctx context.Context, id string) (*model.LoginSession, mod
 		"data_message": resp.Data.Message,
 	}
 
+	if resp.Code != 0 {
+		session.Status = model.SessionFailed
+		session.ErrorMessage = "poll request failed: " + resp.Msg
+		session.UpdatedAt = time.Now()
+		if err := s.store.Save(session); err != nil {
+			return nil, model.PollStateFailed, err
+		}
+		return session, model.PollStateFailed, nil
+	}
+
 	state := convertPollCode(resp.Data.Code)
 	session.Status = stateToSessionStatus(state)
 	session.UpdatedAt = time.Now()
