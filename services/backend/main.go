@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,13 +29,14 @@ import (
 )
 
 const (
-	listenAddr      = "127.0.0.1:23333"
-	configFileName  = "config.yaml"
-	dateTimeLayout  = "2006-01-02 15:04:05"
-	monthFileLayout = "2006_01"
+	defaultListenAddr = "127.0.0.1:23333"
+	configFileName    = "config.yaml"
+	dateTimeLayout    = "2006-01-02 15:04:05"
+	monthFileLayout   = "2006_01"
 )
 
 type AppConfig struct {
+	ListenAddr  string
 	ProxyTarget string
 	DataDir     string
 	QueueDir    string
@@ -92,11 +94,7 @@ type Server struct {
 }
 
 func main() {
-	wd, err := os.Getwd()
-	if err != nil {
-		log.Fatalf("获取工作目录失败: %v", err)
-	}
-	cfgMgr, err := NewConfigManager(filepath.Join(wd, configFileName))
+	cfgMgr, err := NewConfigManager(resolveConfigPath())
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
@@ -117,18 +115,43 @@ func main() {
 	mux.HandleFunc("/config/add", s.handleAddQueueItem)
 	mux.HandleFunc("/b", s.handleQueueBoard)
 
-	log.Printf("服务启动: http://%s", listenAddr)
-	if err := http.ListenAndServe(listenAddr, mux); err != nil {
+	log.Printf("服务启动: http://%s", cfg.ListenAddr)
+	if err := http.ListenAndServe(cfg.ListenAddr, mux); err != nil {
 		log.Fatalf("服务异常: %v", err)
 	}
 }
 
+func resolveConfigPath() string {
+	if path := strings.TrimSpace(os.Getenv("PDJ_CONFIG_PATH")); path != "" {
+		return path
+	}
+
+	if _, err := os.Stat(configFileName); err == nil {
+		return configFileName
+	}
+
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if ok {
+		return filepath.Join(filepath.Dir(sourceFile), configFileName)
+	}
+
+	return configFileName
+}
+
 func DefaultConfig() AppConfig {
-	return AppConfig{DataDir: "data", QueueDir: "data/queues", LogDir: "data/logs"}
+	return AppConfig{
+		ListenAddr: defaultListenAddr,
+		DataDir:    "data",
+		QueueDir:   "data/queues",
+		LogDir:     "data/logs",
+	}
 }
 
 func normalizeConfig(cfg AppConfig) AppConfig {
 	def := DefaultConfig()
+	if strings.TrimSpace(cfg.ListenAddr) == "" {
+		cfg.ListenAddr = def.ListenAddr
+	}
 	if strings.TrimSpace(cfg.DataDir) == "" {
 		cfg.DataDir = def.DataDir
 	}
@@ -158,6 +181,8 @@ func parseSimpleYAML(b []byte) AppConfig {
 		v := strings.TrimSpace(parts[1])
 		v = strings.Trim(v, `"'`)
 		switch k {
+		case "listen_addr":
+			cfg.ListenAddr = v
 		case "proxy_target":
 			cfg.ProxyTarget = v
 		case "data_dir":
@@ -173,7 +198,7 @@ func parseSimpleYAML(b []byte) AppConfig {
 
 func marshalSimpleYAML(cfg AppConfig) []byte {
 	cfg = normalizeConfig(cfg)
-	return []byte(fmt.Sprintf("proxy_target: %s\ndata_dir: %s\nqueue_dir: %s\nlog_dir: %s\n", cfg.ProxyTarget, cfg.DataDir, cfg.QueueDir, cfg.LogDir))
+	return []byte(fmt.Sprintf("listen_addr: %s\nproxy_target: %s\ndata_dir: %s\nqueue_dir: %s\nlog_dir: %s\n", cfg.ListenAddr, cfg.ProxyTarget, cfg.DataDir, cfg.QueueDir, cfg.LogDir))
 }
 
 func NewConfigManager(path string) (*ConfigManager, error) {
