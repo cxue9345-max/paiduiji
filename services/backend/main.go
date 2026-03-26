@@ -42,6 +42,40 @@ type AppConfig struct {
 	DataDir     string
 	QueueDir    string
 	LogDir      string
+	Panel       PanelConfig
+	MyJS        MyJSConfig
+}
+
+type PanelConfig struct {
+	RoomID int
+	UID    int
+	Cookie string
+}
+
+type MyJSConfig struct {
+	Admins                 []string `json:"admins"`
+	BanAdmins              []string `json:"ban_admins"`
+	Jianzhang              []string `json:"jianzhang"`
+	Fankui                 bool     `json:"fankui"`
+	GuanliFankui           bool     `json:"guanli_fankui"`
+	PaiduiListLengthMax    int      `json:"paidui_list_length_max"`
+	Jianzhangchadui        bool     `json:"jianzhangchadui"`
+	JianzhangCDKind        int      `json:"jianzhang_cd_kind"`
+	JianzhangCDCishu       int      `json:"jianzhang_cd_cishu"`
+	FangguanCanDoing       bool     `json:"fangguan_can_doing"`
+	AllSuoyourenbukepaidui bool     `json:"all_suoyourenbukepaidui"`
+	YHbotKaiguan           bool     `json:"yhbot_kaiguan"`
+	YHbotID                string   `json:"yhbotid"`
+	YHbotMsgType           string   `json:"yhbot_msg_type"`
+	YHbotWebhookToken      string   `json:"yhbot_webhook_token"`
+	WsZbtoolKaiguan        bool     `json:"ws_zbtool_kaiguan"`
+	QYWXKaiguan            bool     `json:"qywx_kaiguan"`
+	WXWebhook              string   `json:"wx_webhook"`
+	OnlyMyfunsPaidui       bool     `json:"only_myfuns_paidui"`
+	LiwuChaduiKg           bool     `json:"liwu_chadui_kg"`
+	LiwuPaiduiKg           bool     `json:"liwu_paidui_kg"`
+	LiwuChaduiKind         int      `json:"liwu_chadui_kind"`
+	LiwuPaiduiKind         int      `json:"liwu_paidui_kind"`
 }
 
 type QueueItem struct {
@@ -179,6 +213,21 @@ func DefaultConfig() AppConfig {
 		DataDir:    "data",
 		QueueDir:   "data/queues",
 		LogDir:     "data/logs",
+		Panel: PanelConfig{
+			RoomID: 0,
+			UID:    0,
+			Cookie: "",
+		},
+		MyJS: MyJSConfig{
+			Admins:              []string{"迷糊的迷糊菇", "一纸轻予梦", "写一下你的名字哦"},
+			BanAdmins:           []string{"黑名单成员", "黑名单成员2", "黑猫静止"},
+			Jianzhang:           []string{""},
+			PaiduiListLengthMax: 100,
+			JianzhangCDKind:     1,
+			JianzhangCDCishu:    1,
+			LiwuChaduiKind:      50,
+			LiwuPaiduiKind:      50,
+		},
 	}
 }
 
@@ -226,6 +275,62 @@ func parseSimpleYAML(b []byte) AppConfig {
 			cfg.QueueDir = v
 		case "log_dir":
 			cfg.LogDir = v
+		case "roomid":
+			if n, err := strconv.Atoi(v); err == nil {
+				cfg.Panel.RoomID = n
+			}
+		case "uid":
+			if n, err := strconv.Atoi(v); err == nil {
+				cfg.Panel.UID = n
+			}
+		case "cookie":
+			cfg.Panel.Cookie = v
+		case "admins":
+			cfg.MyJS.Admins = splitCSV(v)
+		case "ban_admins":
+			cfg.MyJS.BanAdmins = splitCSV(v)
+		case "jianzhang":
+			cfg.MyJS.Jianzhang = splitCSV(v)
+		case "fankui":
+			cfg.MyJS.Fankui = parseBool(v, cfg.MyJS.Fankui)
+		case "guanli_fankui":
+			cfg.MyJS.GuanliFankui = parseBool(v, cfg.MyJS.GuanliFankui)
+		case "paidui_list_length_max":
+			cfg.MyJS.PaiduiListLengthMax = parseInt(v, cfg.MyJS.PaiduiListLengthMax)
+		case "jianzhangchadui":
+			cfg.MyJS.Jianzhangchadui = parseBool(v, cfg.MyJS.Jianzhangchadui)
+		case "jianzhang_cd_kind":
+			cfg.MyJS.JianzhangCDKind = parseInt(v, cfg.MyJS.JianzhangCDKind)
+		case "jianzhang_cd_cishu":
+			cfg.MyJS.JianzhangCDCishu = parseInt(v, cfg.MyJS.JianzhangCDCishu)
+		case "fangguan_can_doing":
+			cfg.MyJS.FangguanCanDoing = parseBool(v, cfg.MyJS.FangguanCanDoing)
+		case "all_suoyourenbukepaidui":
+			cfg.MyJS.AllSuoyourenbukepaidui = parseBool(v, cfg.MyJS.AllSuoyourenbukepaidui)
+		case "yhbot_kaiguan":
+			cfg.MyJS.YHbotKaiguan = parseBool(v, cfg.MyJS.YHbotKaiguan)
+		case "yhbotid":
+			cfg.MyJS.YHbotID = v
+		case "yhbot_msg_type":
+			cfg.MyJS.YHbotMsgType = v
+		case "yhbot_webhook_token":
+			cfg.MyJS.YHbotWebhookToken = v
+		case "ws_zbtool_kaiguan":
+			cfg.MyJS.WsZbtoolKaiguan = parseBool(v, cfg.MyJS.WsZbtoolKaiguan)
+		case "qywx_kaiguan":
+			cfg.MyJS.QYWXKaiguan = parseBool(v, cfg.MyJS.QYWXKaiguan)
+		case "wx_webhook":
+			cfg.MyJS.WXWebhook = v
+		case "only_myfuns_paidui":
+			cfg.MyJS.OnlyMyfunsPaidui = parseBool(v, cfg.MyJS.OnlyMyfunsPaidui)
+		case "liwu_chadui_kg":
+			cfg.MyJS.LiwuChaduiKg = parseBool(v, cfg.MyJS.LiwuChaduiKg)
+		case "liwu_paidui_kg":
+			cfg.MyJS.LiwuPaiduiKg = parseBool(v, cfg.MyJS.LiwuPaiduiKg)
+		case "liwu_chadui_kind":
+			cfg.MyJS.LiwuChaduiKind = parseInt(v, cfg.MyJS.LiwuChaduiKind)
+		case "liwu_paidui_kind":
+			cfg.MyJS.LiwuPaiduiKind = parseInt(v, cfg.MyJS.LiwuPaiduiKind)
 		}
 	}
 	return normalizeConfig(cfg)
@@ -233,7 +338,58 @@ func parseSimpleYAML(b []byte) AppConfig {
 
 func marshalSimpleYAML(cfg AppConfig) []byte {
 	cfg = normalizeConfig(cfg)
-	return []byte(fmt.Sprintf("listen_addr: %s\nproxy_target: %s\ndata_dir: %s\nqueue_dir: %s\nlog_dir: %s\n", cfg.ListenAddr, cfg.ProxyTarget, cfg.DataDir, cfg.QueueDir, cfg.LogDir))
+	return []byte(fmt.Sprintf("listen_addr: %s\nproxy_target: %s\ndata_dir: %s\nqueue_dir: %s\nlog_dir: %s\nroomid: %d\nuid: %d\ncookie: %s\nadmins: %s\nban_admins: %s\njianzhang: %s\nfankui: %t\nguanli_fankui: %t\npaidui_list_length_max: %d\njianzhangchadui: %t\njianzhang_cd_kind: %d\njianzhang_cd_cishu: %d\nfangguan_can_doing: %t\nall_suoyourenbukepaidui: %t\nyhbot_kaiguan: %t\nyhbotid: %s\nyhbot_msg_type: %s\nyhbot_webhook_token: %s\nws_zbtool_kaiguan: %t\nqywx_kaiguan: %t\nwx_webhook: %s\nonly_myfuns_paidui: %t\nliwu_chadui_kg: %t\nliwu_paidui_kg: %t\nliwu_chadui_kind: %d\nliwu_paidui_kind: %d\n",
+		cfg.ListenAddr, cfg.ProxyTarget, cfg.DataDir, cfg.QueueDir, cfg.LogDir,
+		cfg.Panel.RoomID, cfg.Panel.UID, cfg.Panel.Cookie,
+		joinCSV(cfg.MyJS.Admins), joinCSV(cfg.MyJS.BanAdmins), joinCSV(cfg.MyJS.Jianzhang),
+		cfg.MyJS.Fankui, cfg.MyJS.GuanliFankui, cfg.MyJS.PaiduiListLengthMax,
+		cfg.MyJS.Jianzhangchadui, cfg.MyJS.JianzhangCDKind, cfg.MyJS.JianzhangCDCishu,
+		cfg.MyJS.FangguanCanDoing, cfg.MyJS.AllSuoyourenbukepaidui, cfg.MyJS.YHbotKaiguan,
+		cfg.MyJS.YHbotID, cfg.MyJS.YHbotMsgType, cfg.MyJS.YHbotWebhookToken,
+		cfg.MyJS.WsZbtoolKaiguan, cfg.MyJS.QYWXKaiguan, cfg.MyJS.WXWebhook,
+		cfg.MyJS.OnlyMyfunsPaidui, cfg.MyJS.LiwuChaduiKg, cfg.MyJS.LiwuPaiduiKg,
+		cfg.MyJS.LiwuChaduiKind, cfg.MyJS.LiwuPaiduiKind))
+}
+
+func parseBool(val string, fallback bool) bool {
+	b, err := strconv.ParseBool(strings.TrimSpace(val))
+	if err != nil {
+		return fallback
+	}
+	return b
+}
+
+func parseInt(val string, fallback int) int {
+	n, err := strconv.Atoi(strings.TrimSpace(val))
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func splitCSV(val string) []string {
+	parts := strings.Split(val, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		p := strings.TrimSpace(part)
+		if p == "" {
+			continue
+		}
+		result = append(result, p)
+	}
+	return result
+}
+
+func joinCSV(items []string) string {
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		it := strings.TrimSpace(item)
+		if it == "" {
+			continue
+		}
+		result = append(result, it)
+	}
+	return strings.Join(result, ",")
 }
 
 func NewConfigManager(path string) (*ConfigManager, error) {
@@ -602,22 +758,24 @@ func (s *Server) handleDanmuSub(w http.ResponseWriter, r *http.Request) {
 }
 
 type apiConfigPayload struct {
-	RoomID int    `json:"roomid"`
-	UID    int    `json:"uid"`
-	Cookie string `json:"cookie"`
+	RoomID int        `json:"roomid"`
+	UID    int        `json:"uid"`
+	Cookie string     `json:"cookie"`
+	MyJS   MyJSConfig `json:"myjs"`
 }
 
 func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
-	path := filepath.Join(s.staticDir, "pdj_config.json")
 	switch r.Method {
 	case http.MethodGet:
-		b, err := os.ReadFile(path)
+		cfg := s.cfgMgr.Get()
+		payload := apiConfigPayload{
+			RoomID: cfg.Panel.RoomID,
+			UID:    cfg.Panel.UID,
+			Cookie: cfg.Panel.Cookie,
+			MyJS:   cfg.MyJS,
+		}
+		b, err := json.Marshal(payload)
 		if err != nil {
-			if os.IsNotExist(err) {
-				w.Header().Set("Content-Type", "application/json; charset=utf-8")
-				_, _ = w.Write([]byte(`{"roomid":0,"uid":0,"cookie":""}`))
-				return
-			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -629,23 +787,48 @@ func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid json body", http.StatusBadRequest)
 			return
 		}
-		b, err := json.MarshalIndent(payload, "", "  ")
-		if err != nil {
+		cfg := s.cfgMgr.Get()
+		cfg.Panel.RoomID = payload.RoomID
+		cfg.Panel.UID = payload.UID
+		cfg.Panel.Cookie = payload.Cookie
+		if !isMyJSConfigZero(payload.MyJS) {
+			cfg.MyJS = payload.MyJS
+		}
+		if err := os.WriteFile(s.cfgMgr.path, marshalSimpleYAML(cfg), 0o644); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if err := os.MkdirAll(s.staticDir, 0o755); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+		_, _, _ = s.cfgMgr.ReloadIfChanged()
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func isMyJSConfigZero(cfg MyJSConfig) bool {
+	return len(cfg.Admins) == 0 &&
+		len(cfg.BanAdmins) == 0 &&
+		len(cfg.Jianzhang) == 0 &&
+		!cfg.Fankui &&
+		!cfg.GuanliFankui &&
+		cfg.PaiduiListLengthMax == 0 &&
+		!cfg.Jianzhangchadui &&
+		cfg.JianzhangCDKind == 0 &&
+		cfg.JianzhangCDCishu == 0 &&
+		!cfg.FangguanCanDoing &&
+		!cfg.AllSuoyourenbukepaidui &&
+		!cfg.YHbotKaiguan &&
+		cfg.YHbotID == "" &&
+		cfg.YHbotMsgType == "" &&
+		cfg.YHbotWebhookToken == "" &&
+		!cfg.WsZbtoolKaiguan &&
+		!cfg.QYWXKaiguan &&
+		cfg.WXWebhook == "" &&
+		!cfg.OnlyMyfunsPaidui &&
+		!cfg.LiwuChaduiKg &&
+		!cfg.LiwuPaiduiKg &&
+		cfg.LiwuChaduiKind == 0 &&
+		cfg.LiwuPaiduiKind == 0
 }
 
 func (s *Server) handleConfigPage(w http.ResponseWriter, r *http.Request) {

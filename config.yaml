@@ -16,3 +16,33 @@ bili_poll_url: "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
 redis_addr: ""
 redis_password: ""
 redis_db: 0
+
+# PDJ 控制台基础配置（/api/config 与 myjs.js 会读取这些键）
+roomid: 0
+uid: 0
+cookie: ""
+
+# myjs 可配置区（逗号分隔写法）
+admins: "迷糊的迷糊菇,一纸轻予梦,写一下你的名字哦"
+ban_admins: "黑名单成员,黑名单成员2,黑猫静止"
+jianzhang: ""
+fankui: false
+guanli_fankui: false
+paidui_list_length_max: 100
+jianzhangchadui: false
+jianzhang_cd_kind: 1
+jianzhang_cd_cishu: 1
+fangguan_can_doing: false
+all_suoyourenbukepaidui: false
+yhbot_kaiguan: false
+yhbotid: ""
+yhbot_msg_type: ""
+yhbot_webhook_token: ""
+ws_zbtool_kaiguan: false
+qywx_kaiguan: false
+wx_webhook: ""
+only_myfuns_paidui: false
+liwu_chadui_kg: false
+liwu_paidui_kg: false
+liwu_chadui_kind: 50
+liwu_paidui_kind: 50
