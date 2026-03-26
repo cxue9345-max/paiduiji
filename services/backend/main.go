@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -29,7 +30,8 @@ import (
 )
 
 const (
-	defaultListenAddr = "127.0.0.1:23333"
+	defaultListenAddr = ":9816"
+	defaultStaticDir  = "../../frontend/dograin"
 	configFileName    = "config.yaml"
 	dateTimeLayout    = "2006-01-02 15:04:05"
 	monthFileLayout   = "2006_01"
@@ -87,10 +89,12 @@ type Hub struct {
 }
 
 type Server struct {
-	cfgMgr   *ConfigManager
-	store    *QueueStore
-	proxyMgr *ProxyManager
-	hub      *Hub
+	cfgMgr    *ConfigManager
+	store     *QueueStore
+	proxyMgr  *ProxyManager
+	hub       *Hub
+	static    http.Handler
+	staticDir string
 }
 
 func main() {
@@ -105,11 +109,22 @@ func main() {
 		log.Fatalf("初始化存储失败: %v", err)
 	}
 
-	s := &Server{cfgMgr: cfgMgr, store: store, proxyMgr: NewProxyManager(cfg.ProxyTarget), hub: NewHub()}
+	staticDir := resolveStaticDir()
+	s := &Server{
+		cfgMgr:    cfgMgr,
+		store:     store,
+		proxyMgr:  NewProxyManager(cfg.ProxyTarget),
+		hub:       NewHub(),
+		static:    newStaticFileHandler(staticDir),
+		staticDir: staticDir,
+	}
 	go s.watchConfigLoop()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleRoot)
+	mux.HandleFunc("/dograin/", s.handleDograinStatic)
+	mux.HandleFunc("/danmu/sub", s.handleDanmuSub)
+	mux.HandleFunc("/api/config", s.handleAPIConfig)
 	mux.HandleFunc("/config", s.handleConfigPage)
 	mux.HandleFunc("/config/new-queue", s.handleCreateNewQueue)
 	mux.HandleFunc("/config/add", s.handleAddQueueItem)
@@ -136,6 +151,17 @@ func resolveConfigPath() string {
 	}
 
 	return configFileName
+}
+
+func resolveStaticDir() string {
+	if path := strings.TrimSpace(os.Getenv("PDJ_STATIC_DIR")); path != "" {
+		return path
+	}
+	return defaultStaticDir
+}
+
+func newStaticFileHandler(staticDir string) http.Handler {
+	return http.FileServer(http.Dir(staticDir))
 }
 
 func DefaultConfig() AppConfig {
@@ -533,26 +559,84 @@ func (s *Server) watchConfigLoop() {
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/" && isWebSocketUpgrade(r) {
+	if r.URL.Path == "/danmu/sub" {
 		s.handleWS(w, r)
 		return
 	}
-	if r.URL.Path == "/" {
-		if ok := s.proxyMgr.ServeHTTP(w, r); ok {
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("Go gateway is running"))
+	if strings.HasPrefix(r.URL.Path, "/api/") {
+		http.NotFound(w, r)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/config") || strings.HasPrefix(r.URL.Path, "/b") {
 		http.NotFound(w, r)
 		return
 	}
-	if ok := s.proxyMgr.ServeHTTP(w, r); ok {
+	s.static.ServeHTTP(w, r)
+}
+
+func (s *Server) handleDograinStatic(w http.ResponseWriter, r *http.Request) {
+	orig := r.URL.Path
+	r.URL.Path = strings.TrimPrefix(r.URL.Path, "/dograin")
+	if r.URL.Path == "" {
+		r.URL.Path = "/"
+	}
+	s.static.ServeHTTP(w, r)
+	r.URL.Path = orig
+}
+
+func (s *Server) handleDanmuSub(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/danmu/sub" {
+		http.NotFound(w, r)
 		return
 	}
-	http.NotFound(w, r)
+	s.handleWS(w, r)
+}
+
+type apiConfigPayload struct {
+	RoomID int    `json:"roomid"`
+	UID    int    `json:"uid"`
+	Cookie string `json:"cookie"`
+}
+
+func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
+	path := filepath.Join(s.staticDir, "pdj_config.json")
+	switch r.Method {
+	case http.MethodGet:
+		b, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				_, _ = w.Write([]byte(`{"roomid":0,"uid":0,"cookie":""}`))
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write(b)
+	case http.MethodPost:
+		var payload apiConfigPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid json body", http.StatusBadRequest)
+			return
+		}
+		b, err := json.MarshalIndent(payload, "", "  ")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := os.MkdirAll(s.staticDir, 0o755); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *Server) handleConfigPage(w http.ResponseWriter, r *http.Request) {
