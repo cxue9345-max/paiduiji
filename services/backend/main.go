@@ -21,7 +21,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -145,9 +144,11 @@ func resolveConfigPath() string {
 		return configFileName
 	}
 
-	_, sourceFile, _, ok := runtime.Caller(0)
-	if ok {
-		return filepath.Join(filepath.Dir(sourceFile), configFileName)
+	if exe, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(exe), configFileName)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
 	}
 
 	return configFileName
@@ -157,6 +158,14 @@ func resolveStaticDir() string {
 	if path := strings.TrimSpace(os.Getenv("PDJ_STATIC_DIR")); path != "" {
 		return path
 	}
+
+	if exe, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(exe), "frontend", "dograin")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+
 	return defaultStaticDir
 }
 
