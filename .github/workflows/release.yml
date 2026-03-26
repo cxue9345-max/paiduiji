@@ -1,0 +1,161 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (如 v1.0.0)'
+        required: true
+        default: 'v0.0.0-dev'
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: ''
+            archive: tar.gz
+          - goos: linux
+            goarch: arm64
+            suffix: ''
+            archive: tar.gz
+          - goos: darwin
+            goarch: amd64
+            suffix: ''
+            archive: tar.gz
+          - goos: darwin
+            goarch: arm64
+            suffix: ''
+            archive: tar.gz
+          - goos: windows
+            goarch: amd64
+            suffix: .exe
+            archive: zip
+          - goos: windows
+            goarch: arm64
+            suffix: .exe
+            archive: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: services/backend/go.mod
+
+      - name: Build binary
+        working-directory: services/backend
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -trimpath -ldflags="-s -w" -o paiduiji${{ matrix.suffix }} .
+
+      - name: Assemble package
+        run: |
+          PKG_NAME="paiduiji-${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p "$PKG_NAME/frontend/dograin/排队姬样式常考/主播定制款"
+
+          cp services/backend/paiduiji${{ matrix.suffix }} "$PKG_NAME/"
+
+          cp frontend/dograin/index.html      "$PKG_NAME/frontend/dograin/"
+          cp frontend/dograin/myjs.js         "$PKG_NAME/frontend/dograin/"
+          cp frontend/dograin/pako.min.js     "$PKG_NAME/frontend/dograin/"
+          cp frontend/dograin/quanxian.js     "$PKG_NAME/frontend/dograin/"
+          cp frontend/dograin/obschajian.html "$PKG_NAME/frontend/dograin/"
+
+          cp "frontend/dograin/排队姬样式常考/红色.html" \
+             "$PKG_NAME/frontend/dograin/排队姬样式常考/"
+          cp "frontend/dograin/排队姬样式常考/主播定制款/Misaka_千岁.html" \
+             "$PKG_NAME/frontend/dograin/排队姬样式常考/主播定制款/"
+          cp "frontend/dograin/排队姬样式常考/主播定制款/一纸轻予梦.html" \
+             "$PKG_NAME/frontend/dograin/排队姬样式常考/主播定制款/"
+          cp "frontend/dograin/排队姬样式常考/主播定制款/迷糊的迷糊菇.html" \
+             "$PKG_NAME/frontend/dograin/排队姬样式常考/主播定制款/"
+
+          cat > "$PKG_NAME/frontend/dograin/pdj_config.json" <<'EOF'
+{
+  "roomid": 0,
+  "uid": 0,
+  "cookie": ""
+}
+EOF
+
+          cat > "$PKG_NAME/README.txt" <<'EOF'
+排队姬 启动说明
+================
+
+1. 填写配置
+   打开 frontend/dograin/pdj_config.json
+   填入你的直播间 roomid、uid 和 cookie
+
+2. 启动程序
+   直接运行同目录下的 paiduiji 可执行文件
+   （Windows 用户双击 paiduiji.exe）
+
+3. 访问地址
+   配置面板：http://localhost:9816
+   OBS 浏览器源：http://localhost:9816/dograin/obschajian.html
+
+环境变量（可选）
+   PDJ_STATIC_DIR  前端静态文件目录，默认为程序同级的 frontend/dograin
+   PDJ_CONFIG_PATH 配置文件路径，默认为静态目录下的 pdj_config.json
+EOF
+
+          echo "PKG_NAME=$PKG_NAME" >> $GITHUB_ENV
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        run: tar -czf "${{ env.PKG_NAME }}.tar.gz" "${{ env.PKG_NAME }}"
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        run: zip -r "${{ env.PKG_NAME }}.zip" "${{ env.PKG_NAME }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PKG_NAME }}
+          path: ${{ env.PKG_NAME }}.${{ matrix.archive }}
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Determine version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
+          else
+            echo "VERSION=${{ inputs.version }}" >> $GITHUB_ENV
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: 排队姬 ${{ env.VERSION }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          generate_release_notes: true
+          files: dist/*
