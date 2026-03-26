@@ -39,7 +39,7 @@ var only_myfuns_paidui = false //仅本直播间牌子可排队(需要设置,未
 var liwu_chadui_kg = false;//礼物插队
 var liwu_paidui_kg = false;//礼物排队
 var liwu_chadui_kind = 50;//插队礼物
-var liwu_chadui_kind = 50;//排队礼物
+var liwu_paidui_kind = 50;//排队礼物
 //-----------------------------------------------------------------------------
 jianzhang.push("一纸轻予梦");//强制授予 一纸轻予梦的舰长身份，用于测试。
 console.log("[基础信息]","管理员:",admins,"黑名单",ban_admins,"初始舰长权限",jianzhang);
@@ -90,11 +90,39 @@ async function PDJ_LoadConfig() {
         var cfg = await res.json();
         zroomid = Number(cfg.roomid || 0);
         zuid = Number(cfg.uid || 0);
+        applyMyJSConfig(cfg.myjs || {});
         PDJ_EmitStatus('config_loaded', { config: cfg });
     } catch (err) {
         console.error('[PDJ] 配置读取失败', err);
         PDJ_EmitStatus('config_error', { error: String(err) });
     }
+}
+
+function applyMyJSConfig(mycfg) {
+    if (Array.isArray(mycfg.admins)) admins = mycfg.admins;
+    if (Array.isArray(mycfg.ban_admins)) ban_admins = mycfg.ban_admins;
+    if (Array.isArray(mycfg.jianzhang)) jianzhang = mycfg.jianzhang;
+    if (typeof mycfg.fankui === "boolean") fankui = mycfg.fankui;
+    if (typeof mycfg.guanli_fankui === "boolean") guanli_fankui = mycfg.guanli_fankui;
+    if (Number.isFinite(Number(mycfg.paidui_list_length_max))) paidui_list_length_max = Number(mycfg.paidui_list_length_max);
+    if (typeof mycfg.jianzhangchadui === "boolean") jianzhangchadui = mycfg.jianzhangchadui;
+    if (Number.isFinite(Number(mycfg.jianzhang_cd_kind))) jianzhang_cd_kind = Number(mycfg.jianzhang_cd_kind);
+    if (Number.isFinite(Number(mycfg.jianzhang_cd_cishu))) jianzhang_cd_cishu = Number(mycfg.jianzhang_cd_cishu);
+    if (typeof mycfg.fangguan_can_doing === "boolean") fangguan_can_doing = mycfg.fangguan_can_doing;
+    if (typeof mycfg.all_suoyourenbukepaidui === "boolean") all_suoyourenbukepaidui = mycfg.all_suoyourenbukepaidui;
+    if (typeof mycfg.yhbot_kaiguan === "boolean") YHbot_kaiguan = mycfg.yhbot_kaiguan;
+    if (typeof mycfg.yhbotid === "string") YHbotId = mycfg.yhbotid;
+    if (typeof mycfg.yhbot_msg_type === "string") YHbot_msg_type = mycfg.yhbot_msg_type;
+    if (typeof mycfg.yhbot_webhook_token === "string") YHbot_webhook_token = mycfg.yhbot_webhook_token;
+    if (typeof mycfg.ws_zbtool_kaiguan === "boolean") ws_zbtool_kaiguan = mycfg.ws_zbtool_kaiguan;
+    if (typeof mycfg.qywx_kaiguan === "boolean") QYWX_kaiguan = mycfg.qywx_kaiguan;
+    if (typeof mycfg.wx_webhook === "string") WX_webhook = mycfg.wx_webhook;
+    if (typeof mycfg.only_myfuns_paidui === "boolean") only_myfuns_paidui = mycfg.only_myfuns_paidui;
+    if (typeof mycfg.liwu_chadui_kg === "boolean") liwu_chadui_kg = mycfg.liwu_chadui_kg;
+    if (typeof mycfg.liwu_paidui_kg === "boolean") liwu_paidui_kg = mycfg.liwu_paidui_kg;
+    if (Number.isFinite(Number(mycfg.liwu_chadui_kind))) liwu_chadui_kind = Number(mycfg.liwu_chadui_kind);
+    if (Number.isFinite(Number(mycfg.liwu_paidui_kind))) liwu_paidui_kind = Number(mycfg.liwu_paidui_kind);
+    console.log("[配置覆盖]", { admins, ban_admins, jianzhang, paidui_list_length_max });
 }
 
 async function PDJ_Connect() {
