@@ -1,3 +1,3 @@
 @echo off
-cd /d ./danmuji-green
+cd /d ./backend
 start run.bat

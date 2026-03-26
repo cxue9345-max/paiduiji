@@ -189,9 +189,9 @@ var WX_webhook = ""; // https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
 
 ---
 
-## 9. 弹幕姬（danmuji-green）运行说明
+## 9. 自建后端（backend）运行说明
 
-该版本为 Windows 绿色版。
+当前版本为自建后端。
 
 ### 9.1 Windows 运行
 
@@ -203,11 +203,11 @@ var WX_webhook = ""; // https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
 - 解压后在当前目录打开控制台，执行：
 
 ```bash
-openjdk-8-jre\bin\java -jar -Xms64m -Xmx128m BiliBili_Danmuji-2.7.0.5beta.jar --server.port=23333
+go run ./backend
 ```
 
-- `--server.port=23333` 为端口。
-- 要修改端口，可改 `run.bat` 中对应参数。
+- 默认端口：WebSocket `23333`、配置 API `23334`。
+- 如需改端口，请修改 `backend/main.go` 中 `localWSAddr` / `localAPIAddr`。
 
 ### 9.3 配置与退出
 
@@ -216,8 +216,8 @@ openjdk-8-jre\bin\java -jar -Xms64m -Xmx128m BiliBili_Danmuji-2.7.0.5beta.jar --
 
 ### 9.4 更新与反馈
 
-- 更新：持续关注 GitHub 项目主页。
-- 反馈：GitHub 提 issue，或主页联系方式发邮件。
+- 后端逻辑参考：https://github.com/BanqiJane/Bilibili_Danmuji/
+- 当前仓库使用自建 Go 后端，不再依赖 danmuji-green 绿色包。
 
 ---
 
@@ -255,6 +255,6 @@ openjdk-8-jre\bin\java -jar -Xms64m -Xmx128m BiliBili_Danmuji-2.7.0.5beta.jar --
 - `安装方法以及更新记录/新的myjs替换掉旧的myjs即可完成更新.txt`
 - `pdj/dograin/排队姬样式常考/替换教程.txt`
 - `pdj/dograin/排队姬样式常考/改成index点html替换源文件即可.txt`
-- `danmuji-green/readme.txt`
+- `backend/main.go`
 - `WebCT/源码说明.txt`
 
