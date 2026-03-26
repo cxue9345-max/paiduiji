@@ -3,324 +3,594 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"compress/zlib"
-	"context"
-	"crypto/rand"
 	"crypto/sha1"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
+	"encoding/csv"
 	"errors"
 	"fmt"
+	"html/template"
 	"io"
 	"log"
 	"math"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 const (
-	localWSAddr   = "127.0.0.1:23333"
-	localAPIAddr  = "127.0.0.1:23334"
-	upstreamWSURL = "wss://broadcastlv.chat.bilibili.com/sub"
+	listenAddr      = "127.0.0.1:23333"
+	configFileName  = "config.yaml"
+	dateTimeLayout  = "2006-01-02 15:04:05"
+	monthFileLayout = "2006_01"
 )
 
-var configPath = filepath.Join("..", "..", "frontend", "dograin", "pdj_config.json")
-
-type Config struct {
-	RoomID int    `json:"roomid"`
-	UID    int    `json:"uid"`
-	Cookie string `json:"cookie"`
+type AppConfig struct {
+	ProxyTarget string
+	DataDir     string
+	QueueDir    string
+	LogDir      string
 }
 
-type ConfigStore struct{ mu sync.Mutex }
-
-func (s *ConfigStore) Load() Config {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cfg := Config{RoomID: 26714219}
-	b, err := os.ReadFile(configPath)
-	if err != nil {
-		_ = s.saveLocked(cfg)
-		return cfg
-	}
-	_ = json.Unmarshal(b, &cfg)
-	if cfg.RoomID == 0 {
-		cfg.RoomID = 26714219
-	}
-	return cfg
+type QueueItem struct {
+	Seq       int
+	ID        string
+	Remark    string
+	CreatedAt time.Time
 }
 
-func (s *ConfigStore) Save(cfg Config) (Config, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if cfg.RoomID == 0 {
-		cfg.RoomID = 26714219
-	}
-	return cfg, s.saveLocked(cfg)
+type QueueStore struct {
+	mu sync.Mutex
+
+	queueDir  string
+	logsDir   string
+	current   string
+	logFile   string
+	monthExpr *regexp.Regexp
 }
 
-func (s *ConfigStore) saveLocked(cfg Config) error {
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(configPath, b, 0o644)
+type ConfigManager struct {
+	mu      sync.RWMutex
+	path    string
+	cfg     AppConfig
+	modTime time.Time
+	size    int64
+}
+
+type ProxyManager struct {
+	mu    sync.RWMutex
+	proxy *httputil.ReverseProxy
 }
 
 type wsConn struct {
-	conn       net.Conn
-	rd         *bufio.Reader
-	wrMu       sync.Mutex
-	isClient   bool // client->server frames must be masked
-	closed     atomic.Bool
-	closeOnce  sync.Once
-	closeCh    chan struct{}
-	readDeadMu sync.Mutex
+	conn      net.Conn
+	rd        *bufio.Reader
+	wmu       sync.Mutex
+	closed    bool
+	closeOnce sync.Once
 }
 
-func newWSConn(c net.Conn, isClient bool) *wsConn {
-	return &wsConn{conn: c, rd: bufio.NewReader(c), isClient: isClient, closeCh: make(chan struct{})}
+type Hub struct {
+	mu      sync.Mutex
+	clients map[*wsConn]struct{}
 }
 
-func (w *wsConn) Close() error {
-	var err error
-	w.closeOnce.Do(func() {
-		w.closed.Store(true)
-		close(w.closeCh)
-		err = w.conn.Close()
-	})
-	return err
+type Server struct {
+	cfgMgr   *ConfigManager
+	store    *QueueStore
+	proxyMgr *ProxyManager
+	hub      *Hub
 }
 
-func (w *wsConn) SetReadDeadline(t time.Time) error {
-	w.readDeadMu.Lock()
-	defer w.readDeadMu.Unlock()
-	return w.conn.SetReadDeadline(t)
-}
-
-func (w *wsConn) WriteText(data []byte) error   { return w.writeFrame(0x1, data) }
-func (w *wsConn) WriteBinary(data []byte) error { return w.writeFrame(0x2, data) }
-func (w *wsConn) WritePong(data []byte) error   { return w.writeFrame(0xA, data) }
-
-func (w *wsConn) writeFrame(opcode byte, payload []byte) error {
-	if w.closed.Load() {
-		return io.EOF
+func main() {
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("获取工作目录失败: %v", err)
 	}
-	w.wrMu.Lock()
-	defer w.wrMu.Unlock()
-
-	finOpcode := byte(0x80) | (opcode & 0x0F)
-	head := []byte{finOpcode}
-	maskBit := byte(0)
-	if w.isClient {
-		maskBit = 0x80
+	cfgMgr, err := NewConfigManager(filepath.Join(wd, configFileName))
+	if err != nil {
+		log.Fatalf("加载配置失败: %v", err)
 	}
-	plen := len(payload)
-	switch {
-	case plen <= 125:
-		head = append(head, maskBit|byte(plen))
-	case plen <= math.MaxUint16:
-		head = append(head, maskBit|126, byte(plen>>8), byte(plen))
-	default:
-		head = append(head, maskBit|127)
-		b := make([]byte, 8)
-		binary.BigEndian.PutUint64(b, uint64(plen))
-		head = append(head, b...)
+	cfg := cfgMgr.Get()
+
+	store, err := NewQueueStore(cfg)
+	if err != nil {
+		log.Fatalf("初始化存储失败: %v", err)
 	}
 
-	if w.isClient {
-		mask := make([]byte, 4)
-		if _, err := rand.Read(mask); err != nil {
+	s := &Server{cfgMgr: cfgMgr, store: store, proxyMgr: NewProxyManager(cfg.ProxyTarget), hub: NewHub()}
+	go s.watchConfigLoop()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handleRoot)
+	mux.HandleFunc("/config", s.handleConfigPage)
+	mux.HandleFunc("/config/new-queue", s.handleCreateNewQueue)
+	mux.HandleFunc("/config/add", s.handleAddQueueItem)
+	mux.HandleFunc("/b", s.handleQueueBoard)
+
+	log.Printf("服务启动: http://%s", listenAddr)
+	if err := http.ListenAndServe(listenAddr, mux); err != nil {
+		log.Fatalf("服务异常: %v", err)
+	}
+}
+
+func DefaultConfig() AppConfig {
+	return AppConfig{DataDir: "data", QueueDir: "data/queues", LogDir: "data/logs"}
+}
+
+func normalizeConfig(cfg AppConfig) AppConfig {
+	def := DefaultConfig()
+	if strings.TrimSpace(cfg.DataDir) == "" {
+		cfg.DataDir = def.DataDir
+	}
+	if strings.TrimSpace(cfg.QueueDir) == "" {
+		cfg.QueueDir = filepath.Join(cfg.DataDir, "queues")
+	}
+	if strings.TrimSpace(cfg.LogDir) == "" {
+		cfg.LogDir = filepath.Join(cfg.DataDir, "logs")
+	}
+	cfg.ProxyTarget = strings.TrimSpace(cfg.ProxyTarget)
+	return cfg
+}
+
+func parseSimpleYAML(b []byte) AppConfig {
+	cfg := DefaultConfig()
+	s := bufio.NewScanner(bytes.NewReader(b))
+	for s.Scan() {
+		line := strings.TrimSpace(s.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		k := strings.TrimSpace(parts[0])
+		v := strings.TrimSpace(parts[1])
+		v = strings.Trim(v, `"'`)
+		switch k {
+		case "proxy_target":
+			cfg.ProxyTarget = v
+		case "data_dir":
+			cfg.DataDir = v
+		case "queue_dir":
+			cfg.QueueDir = v
+		case "log_dir":
+			cfg.LogDir = v
+		}
+	}
+	return normalizeConfig(cfg)
+}
+
+func marshalSimpleYAML(cfg AppConfig) []byte {
+	cfg = normalizeConfig(cfg)
+	return []byte(fmt.Sprintf("proxy_target: %s\ndata_dir: %s\nqueue_dir: %s\nlog_dir: %s\n", cfg.ProxyTarget, cfg.DataDir, cfg.QueueDir, cfg.LogDir))
+}
+
+func NewConfigManager(path string) (*ConfigManager, error) {
+	m := &ConfigManager{path: path}
+	if err := m.loadOrInit(); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (m *ConfigManager) loadOrInit() error {
+	st, err := os.Stat(m.path)
+	if err != nil {
+		if !os.IsNotExist(err) {
 			return err
 		}
-		head = append(head, mask...)
-		masked := make([]byte, plen)
-		for i := 0; i < plen; i++ {
-			masked[i] = payload[i] ^ mask[i%4]
-		}
-		if _, err := w.conn.Write(head); err != nil {
+		if err := os.WriteFile(m.path, marshalSimpleYAML(DefaultConfig()), 0o644); err != nil {
 			return err
 		}
-		_, err := w.conn.Write(masked)
-		return err
-	}
-
-	if _, err := w.conn.Write(head); err != nil {
-		return err
-	}
-	_, err := w.conn.Write(payload)
-	return err
-}
-
-func (w *wsConn) ReadFrame() (byte, []byte, error) {
-	first, err := w.rd.ReadByte()
-	if err != nil {
-		return 0, nil, err
-	}
-	second, err := w.rd.ReadByte()
-	if err != nil {
-		return 0, nil, err
-	}
-	fin := first&0x80 != 0
-	opcode := first & 0x0F
-	if !fin {
-		return 0, nil, errors.New("fragmented frames unsupported")
-	}
-	masked := second&0x80 != 0
-	plen := int(second & 0x7F)
-	if plen == 126 {
-		len2 := make([]byte, 2)
-		if _, err = io.ReadFull(w.rd, len2); err != nil {
-			return 0, nil, err
-		}
-		plen = int(binary.BigEndian.Uint16(len2))
-	} else if plen == 127 {
-		len8 := make([]byte, 8)
-		if _, err = io.ReadFull(w.rd, len8); err != nil {
-			return 0, nil, err
-		}
-		u := binary.BigEndian.Uint64(len8)
-		if u > 32*1024*1024 {
-			return 0, nil, errors.New("frame too large")
-		}
-		plen = int(u)
-	}
-	var maskKey [4]byte
-	if masked {
-		if _, err = io.ReadFull(w.rd, maskKey[:]); err != nil {
-			return 0, nil, err
-		}
-	}
-	payload := make([]byte, plen)
-	if plen > 0 {
-		if _, err = io.ReadFull(w.rd, payload); err != nil {
-			return 0, nil, err
-		}
-	}
-	if masked {
-		for i := range payload {
-			payload[i] ^= maskKey[i%4]
-		}
-	}
-	return opcode, payload, nil
-}
-
-func serverUpgrade(w http.ResponseWriter, req *http.Request) (*wsConn, error) {
-	if !strings.EqualFold(req.Header.Get("Connection"), "Upgrade") && !strings.Contains(strings.ToLower(req.Header.Get("Connection")), "upgrade") {
-		return nil, errors.New("invalid Connection header")
-	}
-	if !strings.EqualFold(req.Header.Get("Upgrade"), "websocket") {
-		return nil, errors.New("invalid Upgrade header")
-	}
-	key := strings.TrimSpace(req.Header.Get("Sec-WebSocket-Key"))
-	if key == "" {
-		return nil, errors.New("missing websocket key")
-	}
-	hj, ok := w.(http.Hijacker)
-	if !ok {
-		return nil, errors.New("hijacking not supported")
-	}
-	conn, buf, err := hj.Hijack()
-	if err != nil {
-		return nil, err
-	}
-	accept := computeAcceptKey(key)
-	resp := "HTTP/1.1 101 Switching Protocols\r\n" +
-		"Upgrade: websocket\r\n" +
-		"Connection: Upgrade\r\n" +
-		"Sec-WebSocket-Accept: " + accept + "\r\n\r\n"
-	if _, err = buf.WriteString(resp); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	if err = buf.Flush(); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	return newWSConn(conn, false), nil
-}
-
-func clientDial(rawURL string, headers map[string]string) (*wsConn, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return nil, err
-	}
-	host := u.Host
-	if !strings.Contains(host, ":") {
-		if u.Scheme == "wss" {
-			host += ":443"
-		} else {
-			host += ":80"
-		}
-	}
-	var conn net.Conn
-	if u.Scheme == "wss" {
-		conn, err = tls.Dial("tcp", host, &tls.Config{ServerName: strings.Split(u.Host, ":")[0], MinVersion: tls.VersionTLS12})
-	} else {
-		conn, err = net.Dial("tcp", host)
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	keyRaw := make([]byte, 16)
-	_, _ = rand.Read(keyRaw)
-	wsKey := base64.StdEncoding.EncodeToString(keyRaw)
-	path := u.RequestURI()
-	if path == "" {
-		path = "/"
-	}
-
-	var reqBuf bytes.Buffer
-	fmt.Fprintf(&reqBuf, "GET %s HTTP/1.1\r\n", path)
-	fmt.Fprintf(&reqBuf, "Host: %s\r\n", u.Host)
-	fmt.Fprintf(&reqBuf, "Upgrade: websocket\r\n")
-	fmt.Fprintf(&reqBuf, "Connection: Upgrade\r\n")
-	fmt.Fprintf(&reqBuf, "Sec-WebSocket-Version: 13\r\n")
-	fmt.Fprintf(&reqBuf, "Sec-WebSocket-Key: %s\r\n", wsKey)
-	for k, v := range headers {
-		fmt.Fprintf(&reqBuf, "%s: %s\r\n", k, v)
-	}
-	fmt.Fprintf(&reqBuf, "\r\n")
-
-	if _, err = conn.Write(reqBuf.Bytes()); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-
-	rd := bufio.NewReader(conn)
-	status, err := rd.ReadString('\n')
-	if err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	if !strings.Contains(status, "101") {
-		_ = conn.Close()
-		return nil, fmt.Errorf("websocket handshake failed: %s", strings.TrimSpace(status))
-	}
-	for {
-		line, err := rd.ReadString('\n')
+		st, err = os.Stat(m.path)
 		if err != nil {
-			_ = conn.Close()
-			return nil, err
-		}
-		if line == "\r\n" {
-			break
+			return err
 		}
 	}
-	return &wsConn{conn: conn, rd: rd, isClient: true, closeCh: make(chan struct{})}, nil
+	b, err := os.ReadFile(m.path)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.cfg = parseSimpleYAML(b)
+	m.modTime = st.ModTime()
+	m.size = st.Size()
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *ConfigManager) ReloadIfChanged() (AppConfig, bool, error) {
+	st, err := os.Stat(m.path)
+	if err != nil {
+		return AppConfig{}, false, err
+	}
+	m.mu.RLock()
+	unchanged := st.ModTime().Equal(m.modTime) && st.Size() == m.size
+	m.mu.RUnlock()
+	if unchanged {
+		return AppConfig{}, false, nil
+	}
+	b, err := os.ReadFile(m.path)
+	if err != nil {
+		return AppConfig{}, false, err
+	}
+	cfg := parseSimpleYAML(b)
+	m.mu.Lock()
+	m.cfg = cfg
+	m.modTime = st.ModTime()
+	m.size = st.Size()
+	m.mu.Unlock()
+	return cfg, true, nil
+}
+
+func (m *ConfigManager) Get() AppConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.cfg
+}
+
+func NewQueueStore(cfg AppConfig) (*QueueStore, error) {
+	s := &QueueStore{monthExpr: regexp.MustCompile(`^queue_(\d{4})_(\d{2})\.csv$`)}
+	if err := s.UpdatePaths(cfg); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *QueueStore) UpdatePaths(cfg AppConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.queueDir = cfg.QueueDir
+	s.logsDir = cfg.LogDir
+	s.current = filepath.Join(cfg.QueueDir, "current_queue.csv")
+	s.logFile = filepath.Join(cfg.LogDir, "queue.log")
+	return s.ensureFilesLocked()
+}
+
+func (s *QueueStore) ensureFilesLocked() error {
+	if err := os.MkdirAll(s.queueDir, 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(s.logsDir, 0o755); err != nil {
+		return err
+	}
+	if _, err := os.Stat(s.current); err != nil {
+		if os.IsNotExist(err) {
+			if err := writeCSVAtomic(s.current, nil); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+	f, err := os.OpenFile(s.logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+func (s *QueueStore) readCurrentLocked() ([]QueueItem, error) {
+	f, err := os.Open(s.current)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+	r := csv.NewReader(f)
+	recs, err := r.ReadAll()
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	items := make([]QueueItem, 0, len(recs))
+	for _, rec := range recs {
+		if len(rec) < 4 {
+			continue
+		}
+		seq, err := strconv.Atoi(rec[0])
+		if err != nil {
+			continue
+		}
+		tm, err := time.ParseInLocation(dateTimeLayout, rec[3], time.Local)
+		if err != nil {
+			tm = time.Now()
+		}
+		items = append(items, QueueItem{Seq: seq, ID: rec[1], Remark: rec[2], CreatedAt: tm})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Seq < items[j].Seq })
+	return items, nil
+}
+
+func writeCSVAtomic(path string, items []QueueItem) error {
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	for _, item := range items {
+		if err := w.Write([]string{strconv.Itoa(item.Seq), item.ID, item.Remark, item.CreatedAt.Format(dateTimeLayout)}); err != nil {
+			return err
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, buf.Bytes(), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func appendItemsToCSV(path string, items []QueueItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := csv.NewWriter(f)
+	for _, item := range items {
+		if err := w.Write([]string{strconv.Itoa(item.Seq), item.ID, item.Remark, item.CreatedAt.Format(dateTimeLayout)}); err != nil {
+			return err
+		}
+	}
+	w.Flush()
+	return w.Error()
+}
+
+func (s *QueueStore) appendLogLocked(msg string) {
+	f, err := os.OpenFile(s.logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		log.Printf("日志写入失败: %v", err)
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(fmt.Sprintf("%s %s\n", time.Now().Format(dateTimeLayout), msg))
+}
+
+func (s *QueueStore) ListCurrent() ([]QueueItem, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.readCurrentLocked()
+}
+
+func (s *QueueStore) Add(id, remark string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items, err := s.readCurrentLocked()
+	if err != nil {
+		return err
+	}
+	items = append(items, QueueItem{Seq: len(items) + 1, ID: id, Remark: remark, CreatedAt: time.Now().Truncate(time.Second)})
+	if err := writeCSVAtomic(s.current, items); err != nil {
+		return err
+	}
+	s.appendLogLocked("ADD id=" + id)
+	return nil
+}
+
+func (s *QueueStore) CreateNewQueue() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items, err := s.readCurrentLocked()
+	if err != nil {
+		return err
+	}
+	if len(items) > 0 {
+		monthFile := filepath.Join(s.queueDir, "queue_"+time.Now().Format(monthFileLayout)+".csv")
+		if err := appendItemsToCSV(monthFile, items); err != nil {
+			return err
+		}
+	}
+	if err := writeCSVAtomic(s.current, nil); err != nil {
+		return err
+	}
+	s.appendLogLocked(fmt.Sprintf("ROTATE merged=%d", len(items)))
+	return s.cleanupOldMonthlyLocked(6)
+}
+
+func (s *QueueStore) cleanupOldMonthlyLocked(months int) error {
+	entries, err := os.ReadDir(s.queueDir)
+	if err != nil {
+		return err
+	}
+	threshold := time.Now().AddDate(0, -months, 0)
+	boundary := time.Date(threshold.Year(), threshold.Month(), 1, 0, 0, 0, 0, time.Local)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		m := s.monthExpr.FindStringSubmatch(e.Name())
+		if len(m) != 3 {
+			continue
+		}
+		y, _ := strconv.Atoi(m[1])
+		mo, _ := strconv.Atoi(m[2])
+		fm := time.Date(y, time.Month(mo), 1, 0, 0, 0, 0, time.Local)
+		if fm.Before(boundary) {
+			_ = os.Remove(filepath.Join(s.queueDir, e.Name()))
+			s.appendLogLocked("CLEAN old=" + e.Name())
+		}
+	}
+	return nil
+}
+
+func NewProxyManager(target string) *ProxyManager {
+	p := &ProxyManager{}
+	p.Update(target)
+	return p
+}
+
+func (p *ProxyManager) Update(target string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	target = strings.TrimSpace(target)
+	if target == "" {
+		p.proxy = nil
+		return
+	}
+	u, err := url.Parse(target)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		log.Printf("proxy_target 非法，已忽略: %q", target)
+		p.proxy = nil
+		return
+	}
+	p.proxy = httputil.NewSingleHostReverseProxy(u)
+	p.proxy.ErrorLog = log.New(os.Stderr, "[proxy] ", log.LstdFlags)
+}
+
+func (p *ProxyManager) ServeHTTP(w http.ResponseWriter, r *http.Request) bool {
+	p.mu.RLock()
+	proxy := p.proxy
+	p.mu.RUnlock()
+	if proxy == nil {
+		return false
+	}
+	proxy.ServeHTTP(w, r)
+	return true
+}
+
+func NewHub() *Hub {
+	return &Hub{clients: map[*wsConn]struct{}{}}
+}
+
+func (h *Hub) Add(c *wsConn) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.clients[c] = struct{}{}
+}
+func (h *Hub) Remove(c *wsConn) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.clients, c)
+}
+func (h *Hub) Broadcast(msg string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for c := range h.clients {
+		if err := c.WriteText([]byte(msg)); err != nil {
+			_ = c.Close()
+			delete(h.clients, c)
+		}
+	}
+}
+
+func (s *Server) watchConfigLoop() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		cfg, changed, err := s.cfgMgr.ReloadIfChanged()
+		if err != nil {
+			log.Printf("热更新失败: %v", err)
+			continue
+		}
+		if changed {
+			s.proxyMgr.Update(cfg.ProxyTarget)
+			if err := s.store.UpdatePaths(cfg); err != nil {
+				log.Printf("更新路径失败: %v", err)
+			}
+		}
+	}
+}
+
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/" && isWebSocketUpgrade(r) {
+		s.handleWS(w, r)
+		return
+	}
+	if r.URL.Path == "/" {
+		if ok := s.proxyMgr.ServeHTTP(w, r); ok {
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("Go gateway is running"))
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/config") || strings.HasPrefix(r.URL.Path, "/b") {
+		http.NotFound(w, r)
+		return
+	}
+	if ok := s.proxyMgr.ServeHTTP(w, r); ok {
+		return
+	}
+	http.NotFound(w, r)
+}
+
+func (s *Server) handleConfigPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cfg := s.cfgMgr.Get()
+	items, _ := s.store.ListCurrent()
+	_ = configPageTpl.Execute(w, map[string]any{"Config": cfg, "Count": len(items)})
+}
+
+func (s *Server) handleAddQueueItem(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	id := strings.TrimSpace(r.FormValue("id"))
+	remark := strings.TrimSpace(r.FormValue("remark"))
+	if id == "" {
+		http.Error(w, "id 不能为空", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.Add(id, remark); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.hub.Broadcast("queue_updated")
+	http.Redirect(w, r, "/config", http.StatusSeeOther)
+}
+
+func (s *Server) handleCreateNewQueue(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.store.CreateNewQueue(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.hub.Broadcast("queue_rotated")
+	http.Redirect(w, r, "/config", http.StatusSeeOther)
+}
+
+func (s *Server) handleQueueBoard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	items, err := s.store.ListCurrent()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = boardPageTpl.Execute(w, map[string]any{"Items": items})
+}
+
+func isWebSocketUpgrade(r *http.Request) bool {
+	return strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade") && strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
 }
 
 func computeAcceptKey(key string) string {
@@ -328,272 +598,136 @@ func computeAcceptKey(key string) string {
 	return base64.StdEncoding.EncodeToString(h[:])
 }
 
-type Relay struct {
-	store         *ConfigStore
-	clients       map[*wsConn]struct{}
-	clientsMu     sync.RWMutex
-	configVersion atomic.Int64
-}
-
-func NewRelay(store *ConfigStore) *Relay {
-	return &Relay{store: store, clients: map[*wsConn]struct{}{}}
-}
-func (r *Relay) NotifyConfigChanged() { r.configVersion.Add(1) }
-
-func (r *Relay) addClient(c *wsConn) {
-	r.clientsMu.Lock()
-	defer r.clientsMu.Unlock()
-	r.clients[c] = struct{}{}
-}
-
-func (r *Relay) removeClient(c *wsConn) {
-	r.clientsMu.Lock()
-	defer r.clientsMu.Unlock()
-	delete(r.clients, c)
-}
-
-func (r *Relay) broadcast(payload any) {
-	msg, _ := json.Marshal(payload)
-	r.clientsMu.RLock()
-	clients := make([]*wsConn, 0, len(r.clients))
-	for c := range r.clients {
-		clients = append(clients, c)
+func serverUpgrade(w http.ResponseWriter, req *http.Request) (*wsConn, error) {
+	key := strings.TrimSpace(req.Header.Get("Sec-WebSocket-Key"))
+	if key == "" {
+		return nil, errors.New("missing websocket key")
 	}
-	r.clientsMu.RUnlock()
-	for _, c := range clients {
-		if err := c.WriteText(msg); err != nil {
-			r.removeClient(c)
-			_ = c.Close()
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		return nil, errors.New("hijacking unsupported")
+	}
+	c, buf, err := hj.Hijack()
+	if err != nil {
+		return nil, err
+	}
+	resp := "HTTP/1.1 101 Switching Protocols\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Accept: " + computeAcceptKey(key) + "\r\n\r\n"
+	if _, err := buf.WriteString(resp); err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+	if err := buf.Flush(); err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+	return &wsConn{conn: c, rd: bufio.NewReader(c)}, nil
+}
+
+func (w *wsConn) Close() error {
+	w.closeOnce.Do(func() {
+		w.closed = true
+		_ = w.conn.Close()
+	})
+	return nil
+}
+func (w *wsConn) WriteText(data []byte) error { return w.writeFrame(0x1, data) }
+func (w *wsConn) writeFrame(opcode byte, payload []byte) error {
+	w.wmu.Lock()
+	defer w.wmu.Unlock()
+	if w.closed {
+		return io.EOF
+	}
+	head := []byte{0x80 | (opcode & 0x0F)}
+	plen := len(payload)
+	switch {
+	case plen <= 125:
+		head = append(head, byte(plen))
+	case plen <= math.MaxUint16:
+		head = append(head, 126, byte(plen>>8), byte(plen))
+	default:
+		head = append(head, 127)
+		b := make([]byte, 8)
+		binary.BigEndian.PutUint64(b, uint64(plen))
+		head = append(head, b...)
+	}
+	if _, err := w.conn.Write(head); err != nil {
+		return err
+	}
+	_, err := w.conn.Write(payload)
+	return err
+}
+func (w *wsConn) ReadFrame() (byte, []byte, error) {
+	f, err := w.rd.ReadByte()
+	if err != nil {
+		return 0, nil, err
+	}
+	s, err := w.rd.ReadByte()
+	if err != nil {
+		return 0, nil, err
+	}
+	op := f & 0x0F
+	masked := s&0x80 != 0
+	plen := int(s & 0x7F)
+	if plen == 126 {
+		b := make([]byte, 2)
+		if _, err := io.ReadFull(w.rd, b); err != nil {
+			return 0, nil, err
+		}
+		plen = int(binary.BigEndian.Uint16(b))
+	} else if plen == 127 {
+		b := make([]byte, 8)
+		if _, err := io.ReadFull(w.rd, b); err != nil {
+			return 0, nil, err
+		}
+		plen = int(binary.BigEndian.Uint64(b))
+	}
+	var mask [4]byte
+	if masked {
+		if _, err := io.ReadFull(w.rd, mask[:]); err != nil {
+			return 0, nil, err
 		}
 	}
+	payload := make([]byte, plen)
+	if _, err := io.ReadFull(w.rd, payload); err != nil {
+		return 0, nil, err
+	}
+	if masked {
+		for i := range payload {
+			payload[i] ^= mask[i%4]
+		}
+	}
+	return op, payload, nil
 }
 
-func (r *Relay) wsHandler(w http.ResponseWriter, req *http.Request) {
-	if req.URL.Path != "/danmu/sub" {
-		http.Error(w, "invalid path", http.StatusBadRequest)
-		return
-	}
-	conn, err := serverUpgrade(w, req)
+func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+	c, err := serverUpgrade(w, r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	r.addClient(conn)
-	r.broadcast(map[string]any{"type": "PDJ_STATUS", "status": "client_connected"})
+	s.hub.Add(c)
 	defer func() {
-		r.removeClient(conn)
-		_ = conn.Close()
+		s.hub.Remove(c)
+		_ = c.Close()
 	}()
-
+	_ = c.WriteText([]byte("connected"))
 	for {
-		op, payload, err := conn.ReadFrame()
+		op, payload, err := c.ReadFrame()
 		if err != nil {
 			return
 		}
 		switch op {
 		case 0x8:
 			return
-		case 0x9:
-			_ = conn.WritePong(payload)
+		case 0x1:
+			s.hub.Broadcast(string(payload))
 		}
 	}
 }
 
-func (r *Relay) apiHandler(w http.ResponseWriter, req *http.Request) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-	if req.Method == http.MethodOptions {
-		_, _ = w.Write([]byte(`{"ok":true}`))
-		return
-	}
-	if req.URL.Path != "/api/config" {
-		http.NotFound(w, req)
-		return
-	}
+var configPageTpl = template.Must(template.New("cfg").Parse(`<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><title>配置管理</title><style>body{font-family:Arial;margin:24px;max-width:880px}.card{border:1px solid #ddd;border-radius:8px;padding:16px;margin-bottom:12px}input,button{padding:8px;margin:4px}</style></head><body><h1>配置管理页面</h1><div class="card"><p><b>proxy_target:</b> {{.Config.ProxyTarget}}</p><p><b>queue_dir:</b> {{.Config.QueueDir}}</p><p><b>当前队列数量:</b> {{.Count}}</p><form method="post" action="/config/new-queue"><button type="submit">创建新队列</button></form></div><div class="card"><h3>新增队列项</h3><form method="post" action="/config/add"><input name="id" placeholder="id" required><input name="remark" placeholder="备注"><button type="submit">保存</button></form></div><p><a href="/b">查看展示页</a></p></body></html>`))
 
-	switch req.Method {
-	case http.MethodGet:
-		_ = json.NewEncoder(w).Encode(r.store.Load())
-	case http.MethodPost:
-		var cfg Config
-		if err := json.NewDecoder(req.Body).Decode(&cfg); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-			return
-		}
-		saved, err := r.store.Save(cfg)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-			return
-		}
-		r.NotifyConfigChanged()
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "config": saved})
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
-}
-
-func encodePacket(payload map[string]any, op uint32) ([]byte, error) {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	packetLen := uint32(16 + len(body))
-	buf := make([]byte, packetLen)
-	binary.BigEndian.PutUint32(buf[0:4], packetLen)
-	binary.BigEndian.PutUint16(buf[4:6], 16)
-	binary.BigEndian.PutUint16(buf[6:8], 1)
-	binary.BigEndian.PutUint32(buf[8:12], op)
-	binary.BigEndian.PutUint32(buf[12:16], 1)
-	copy(buf[16:], body)
-	return buf, nil
-}
-
-func decodePackets(blob []byte) []map[string]any {
-	out := make([]map[string]any, 0)
-	offset := 0
-	for offset+16 <= len(blob) {
-		packetLen := int(binary.BigEndian.Uint32(blob[offset : offset+4]))
-		headerLen := int(binary.BigEndian.Uint16(blob[offset+4 : offset+6]))
-		ver := int(binary.BigEndian.Uint16(blob[offset+6 : offset+8]))
-		op := int(binary.BigEndian.Uint32(blob[offset+8 : offset+12]))
-		if packetLen < 16 || offset+packetLen > len(blob) || headerLen < 16 {
-			break
-		}
-		body := blob[offset+headerLen : offset+packetLen]
-		offset += packetLen
-
-		switch op {
-		case 3:
-			pop := 0
-			if len(body) >= 4 {
-				pop = int(binary.BigEndian.Uint32(body[:4]))
-			}
-			out = append(out, map[string]any{"type": "PDJ_STATUS", "status": "popularity", "popularity": pop})
-		case 5:
-			if ver == 2 {
-				zr, err := zlib.NewReader(bytes.NewReader(body))
-				if err != nil {
-					continue
-				}
-				b, err := io.ReadAll(zr)
-				_ = zr.Close()
-				if err == nil {
-					out = append(out, decodePackets(b)...)
-				}
-				continue
-			}
-			var item map[string]any
-			if err := json.Unmarshal(bytes.Trim(body, "\x00"), &item); err == nil {
-				out = append(out, item)
-			}
-		}
-	}
-	return out
-}
-
-func (r *Relay) runUpstream(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		cfg := r.store.Load()
-		version := r.configVersion.Load()
-		r.broadcast(map[string]any{"type": "PDJ_STATUS", "status": "connecting", "roomid": cfg.RoomID})
-
-		headers := map[string]string{}
-		if cfg.Cookie != "" {
-			headers["Cookie"] = cfg.Cookie
-		}
-		up, err := clientDial(upstreamWSURL, headers)
-		if err != nil {
-			r.broadcast(map[string]any{"type": "PDJ_STATUS", "status": "upstream_error", "error": err.Error()})
-			time.Sleep(2 * time.Second)
-			continue
-		}
-
-		auth := map[string]any{"uid": cfg.UID, "roomid": cfg.RoomID, "protover": 2, "platform": "web", "type": 2, "clientver": "1.16.3"}
-		pkt, _ := encodePacket(auth, 7)
-		if err = up.WriteBinary(pkt); err != nil {
-			_ = up.Close()
-			time.Sleep(1500 * time.Millisecond)
-			continue
-		}
-		r.broadcast(map[string]any{"type": "PDJ_STATUS", "status": "connected", "roomid": cfg.RoomID})
-
-		hbTicker := time.NewTicker(30 * time.Second)
-		for {
-			if r.configVersion.Load() != version {
-				r.broadcast(map[string]any{"type": "PDJ_STATUS", "status": "config_changed"})
-				break
-			}
-			_ = up.SetReadDeadline(time.Now().Add(2 * time.Second))
-			op, payload, err := up.ReadFrame()
-			if err != nil {
-				if ne, ok := err.(net.Error); ok && ne.Timeout() {
-					select {
-					case <-hbTicker.C:
-						hb, _ := encodePacket(map[string]any{}, 2)
-						_ = up.WriteBinary(hb)
-					default:
-					}
-					continue
-				}
-				r.broadcast(map[string]any{"type": "PDJ_STATUS", "status": "upstream_error", "error": err.Error()})
-				break
-			}
-			switch op {
-			case 0x8:
-				break
-			case 0x9:
-				_ = up.WritePong(payload)
-			case 0x2:
-				for _, item := range decodePackets(payload) {
-					r.broadcast(item)
-				}
-			}
-		}
-		hbTicker.Stop()
-		_ = up.Close()
-		time.Sleep(1500 * time.Millisecond)
-	}
-}
-
-func main() {
-	if v := os.Getenv("PDJ_CONFIG_PATH"); v != "" {
-		configPath = v
-	}
-	store := &ConfigStore{}
-	relay := NewRelay(store)
-
-	wsMux := http.NewServeMux()
-	wsMux.HandleFunc("/danmu/sub", relay.wsHandler)
-	wsMux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("paiduiji backend running"))
-	})
-
-	apiMux := http.NewServeMux()
-	apiMux.HandleFunc("/api/config", relay.apiHandler)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go relay.runUpstream(ctx)
-
-	go func() {
-		log.Printf("HTTP API listening on http://%s/api/config", localAPIAddr)
-		if err := http.ListenAndServe(localAPIAddr, apiMux); err != nil {
-			log.Fatalf("api server failed: %v", err)
-		}
-	}()
-
-	log.Printf("WS relay + web listening on http://%s", localWSAddr)
-	if err := http.ListenAndServe(localWSAddr, wsMux); err != nil {
-		log.Fatalf("ws server failed: %v", err)
-	}
-}
+var boardPageTpl = template.Must(template.New("b").Parse(`<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><title>队列展示</title><style>body{font-family:Arial;margin:24px}table{border-collapse:collapse;width:100%;max-width:860px}th,td{border:1px solid #ccc;padding:8px}th{background:#f5f5f5}</style></head><body><h1>当前队列</h1><table><thead><tr><th>序号</th><th>id</th><th>备注</th></tr></thead><tbody>{{range .Items}}<tr><td>{{.Seq}}</td><td>{{.ID}}</td><td>{{.Remark}}</td></tr>{{else}}<tr><td colspan="3">暂无数据</td></tr>{{end}}</tbody></table></body></html>`))
