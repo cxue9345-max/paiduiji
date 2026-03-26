@@ -177,3 +177,5 @@ function jsontoprint(data) {
 
 
 }
+
+export { persons }

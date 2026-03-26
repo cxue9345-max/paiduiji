@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bili-auth-backend/internal/model"
 	"bili-auth-backend/internal/service/auth"
 	"bili-auth-backend/internal/utils"
 	"net/http"
@@ -71,16 +72,9 @@ func (h *AuthHandler) Poll(c *gin.Context) {
 		utils.Fail(c, http.StatusNotFound, 1002, "session not found", nil)
 		return
 	}
-	resp := gin.H{
-		"session_id":      s.SessionID,
-		"status":          s.Status,
-		"poll_state":      state,
-		"cookie_captured": len(s.Cookies) > 0,
-		"cookie_count":    len(s.Cookies),
-		"cookie_complete": s.CookieComplete,
-		"missing_keys":    s.MissingKeys,
-		"message":         s.ErrorMessage,
-	}
+	resp := h.buildSessionData(s)
+	resp["poll_state"] = state
+	resp["message"] = s.ErrorMessage
 	if h.debug {
 		resp["cookie_string"] = s.CookieString
 		resp["cookie_map"] = s.Cookies
@@ -95,18 +89,11 @@ func (h *AuthHandler) Session(c *gin.Context) {
 		utils.Fail(c, http.StatusNotFound, 1002, "session not found", nil)
 		return
 	}
-	data := gin.H{
-		"session_id":      s.SessionID,
-		"status":          s.Status,
-		"cookie_captured": len(s.Cookies) > 0,
-		"cookie_count":    len(s.Cookies),
-		"cookie_complete": s.CookieComplete,
-		"missing_keys":    s.MissingKeys,
-		"created_at":      s.CreatedAt,
-		"expires_at":      s.ExpiresAt,
-		"updated_at":      s.UpdatedAt,
-		"error_message":   s.ErrorMessage,
-	}
+	data := h.buildSessionData(s)
+	data["created_at"] = s.CreatedAt
+	data["expires_at"] = s.ExpiresAt
+	data["updated_at"] = s.UpdatedAt
+	data["error_message"] = s.ErrorMessage
 	if h.debug {
 		data["cookie_string"] = s.CookieString
 		data["cookie_map"] = s.Cookies
@@ -122,4 +109,15 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		return
 	}
 	utils.OK(c, "ok", gin.H{"session_id": id, "logged_out": true})
+}
+
+func (h *AuthHandler) buildSessionData(s *model.LoginSession) gin.H {
+	return gin.H{
+		"session_id":      s.SessionID,
+		"status":          s.Status,
+		"cookie_captured": len(s.Cookies) > 0,
+		"cookie_count":    len(s.Cookies),
+		"cookie_complete": s.CookieComplete,
+		"missing_keys":    s.MissingKeys,
+	}
 }
