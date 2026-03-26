@@ -1,0 +1,17 @@
+# 敏感配置，含 cookie，不提交
+frontend/dograin/pdj_config.json
+
+# Go 编译产物
+services/backend/paiduiji
+services/backend/paiduiji.exe
+services/bili-auth-backend/server
+services/WebCT/WebCT
+services/WebCT/WebCT.exe
+
+# Windows 可执行文件（nginx）
+pdj/nginx.exe
+pdj/logs/
+
+# 系统文件
+.DS_Store
+Thumbs.db
