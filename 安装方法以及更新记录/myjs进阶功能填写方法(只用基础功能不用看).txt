@@ -1,0 +1,9 @@
+ 能用再试试新功能!
+//云湖通知器，如不使用无需填写,如果使用,排队列表更新一次会推送一次。云湖开放文档：https://www.yhchat.com/document/400-410
+
+var YHbotId = ""; //群号或者个人的id,是群你得申请机器人后先拉进群。
+var YHbot_msg_type = ""; //如果是推送到群就是group，个人就是user
+var YHbot_webhook_token = "";//机器人的webhook地址 //https://chat-go.jwzhd.com/open-apis/v1/bot/send?token=xxxxx 填bot_webhook_token = "xxxxx"
+//----------------------------
+//企业微信通知器,输入webhook地址即可,不过好像坏了
+var WX_webhook = ""; //https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxx要整行网址

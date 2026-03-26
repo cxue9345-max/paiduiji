@@ -1,0 +1,31 @@
+交流群932531758
+【观看途径】
+一纸轻予梦-主页-排队姬视频＆安装教程合辑
+要是找不到解决办法，就私信问我，群里问我，直播间有时候挂着游戏不一定能看到。qq群最容易看到
+
+
+视频所展示的功能可能会有一些区别，但是最基础的【排队】【排队+内容】【取消排队】【删除/del+数字】【添加/add+内容】是不变的；
+
+【演示视频】
+https://www.bilibili.com/video/BV1De411a7np/?spm_id_from=333.999.0.0&vd_source=6029afe07c3a593114d348ef03e9291b
+【安装教程】
+https://www.bilibili.com/video/BV1wV411Q7sc/?spm_id_from=333.788&vd_source=6029afe07c3a593114d348ef03e9291b
+①下载整合包
+②点开 run.bat 和 nginx.exe ，有些压缩包里面我给你们写好了bat脚本，直接用那个打开就行，记住路径不能有中文。
+③ 浏览器弹出的网页（xxxx：23333）登录，登录之后就不会有***了，然后写一下你的直播间号，连接就行。
+④添加-浏览器插件
+⑤自己测试一下，无需开播
+⑥觉得好用的话，那就接着用，你可以改一下index.html这个文件，这样样式就变了。
+
+
+【免费插件】直播排队姬の弹幕姬更新20240413版本-新增黑名单和排队成功提示功能
+https://www.bilibili.com/video/BV1gt421E7nm/?spm_id_from=333.788&vd_source=6029afe07c3a593114d348ef03e9291b
+
+【免费插件】如何更新排队姬的颜色文件index.html
+https://www.bilibili.com/video/BV1KK421a7zy/?spm_id_from=333.788&vd_source=6029afe07c3a593114d348ef03e9291b
+https://www.bilibili.com/video/BV1cx42117AW/?spm_id_from=333.788&vd_source=6029afe07c3a593114d348ef03e9291b
+【推送功能，暂时不建议使用】
+https://www.bilibili.com/video/BV1TD421L7pr/?spm_id_from=333.788&vd_source=6029afe07c3a593114d348ef03e9291b
+
+【弹幕姬更新办法，就是那个大黑框】
+https://www.bilibili.com/video/BV1jF4m1c7xd/?spm_id_from=333.788&vd_source=6029afe07c3a593114d348ef03e9291b

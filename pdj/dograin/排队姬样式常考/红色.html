@@ -1,0 +1,80 @@
+<html>
+    <meta charset="utf-8">
+<body>
+    <p id="status" hidden></p>
+    <p id="popularity" hidden></p>
+    <script src="pako.min.js"></script>
+    <script src="myjs.js"></script>
+    <div class="wk">
+        <div class="vText">
+            <div>
+             
+                <span>发【排队】即可排队</span>
+         
+
+            </div>
+            
+           
+        </div>
+        <div   id='danmu' class="div">
+        </div>
+    </div>
+  
+
+    <script>
+    </script>
+    <style  type="text/css">
+
+        .wk{
+            width: 100%;
+            height: 100%;
+            /* background-image: linear-gradient(-225deg, #D4FFEC 0%, #57F2CC 48%, #4596FB 100%); */
+           
+            /* text-overflow:ellipsis;超出部分显示省略号 */
+            white-space: nowrap;/*规定段落中的文本不进行换行 */
+        }
+        .div {
+            width: 70%; /*显示的宽度范围，是游览器插件的百分比*/
+            height: 90%; /*显示的高度范围，是游览器插件的百分比*/
+            line-height:1.7; /*名字之间的宽度*/
+            font-size: 90px; /*名字大小*/
+            float: left; /*元素向左浮动*/
+            margin-top: 5%;/*设置外边框为父元素的百分比，应该是外框*/
+            text-align:left;/*文本对齐方式，向左对齐*/
+            overflow: hidden; /*如果超出框会被隐藏*/
+        }
+
+        .div span {
+            background: linear-gradient(to right, rgb(255, 255, 255), rgb(255, 255, 255));
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+
+        .vText {
+            float: left;
+            width: 30%;
+            height: 100%;
+            overflow: hidden; 
+            /* text-overflow:ellipsis;超出部分显示省略号 */
+            white-space: nowrap;/*规定段落中的文本不进行换行 */
+            text-align:center;
+            font-size: 80px;
+            
+        }
+
+        .vText div{
+            height: 100%;
+            padding-top: 10%;
+            writing-mode:tb-rl; 
+            display: inline-block;
+        }
+        .vText span {
+            background: linear-gradient(to right, rgb(255, 43, 43), rgb(255, 3, 3));
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+    </style>
+</body>
+
+
+</html>

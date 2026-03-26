@@ -1,0 +1,5 @@
+myjs.js和index.html在一起的文件夹是我们工作的核心。
+你只需要挑你喜欢的 xxx.html，然后改名成 index.html，替换掉上级的 index.html就可以了。
+
+当然这样颜色是不完全的，也不一定你喜欢。
+你可以参考：https://www.bilibili.com/video/BV17Z4y1Y7Rc/?spm_id_from=333.788&vd_source=6029afe07c3a593114d348ef03e9291b
