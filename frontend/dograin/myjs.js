@@ -102,7 +102,7 @@ async function PDJ_Connect() {
         return ws;
     }
 
-    ws = new WebSocket('ws://localhost:23333/danmu/sub');
+    ws = new WebSocket(PDJ_GetWebSocketURL());
     ws.onopen = function () {
         pdjConnected = true;
         document.getElementById("status").textContent = "已连接";
@@ -147,6 +147,14 @@ async function PDJ_Connect() {
 }
 
 PDJ_Connect();
+
+function PDJ_GetWebSocketURL() {
+    if (window && window.location && (window.location.protocol === "http:" || window.location.protocol === "https:")) {
+        var protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
+        return protocol + window.location.host + "/danmu/sub";
+    }
+    return "ws://127.0.0.1:23333/danmu/sub";
+}
 
 
 function PDJ_Send(payload) {
