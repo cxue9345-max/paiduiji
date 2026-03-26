@@ -51,6 +51,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: services/backend/go.mod
+          cache: false
 
       - name: Build binary
         working-directory: services/backend
@@ -143,6 +144,6 @@ jobs:
         with:
           tag_name: ${{ env.VERSION }}
           name: 排队姬 ${{ env.VERSION }}
-          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          draft: false
           generate_release_notes: true
           files: dist/*
