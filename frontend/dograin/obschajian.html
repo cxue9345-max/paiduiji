@@ -60,6 +60,14 @@
             -webkit-background-clip: text;
             color: transparent;
         }
+        .div span.pdj-confirm-pending {
+            animation: pdjPendingBlink 0.8s infinite alternate;
+            filter: brightness(1.35);
+        }
+        @keyframes pdjPendingBlink {
+            from { opacity: 1; transform: scale(1); }
+            to { opacity: 0.5; transform: scale(1.02); }
+        }
 
         .vText {
             float: left;

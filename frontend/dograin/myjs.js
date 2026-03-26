@@ -70,6 +70,8 @@ super_xinxi_desu = [["一纸轻予梦","喜欢雨露的小青草儿"],[0,0],[0,0
 var zroomid = 0;//你的直播间号（由配置面板注入）
 var zuid = 0;//你的uid（由配置面板注入）
 var persons =[];
+var confirm_wait_seconds = 10; // del 1 的确认时长，默认10秒，可用“设置确认时间 30”调整
+var pendingConfirmTask = null; // { person, originalItem, timerId, startedAt }
 var ws = null;
 var pdjConnected = false;
 
@@ -163,6 +165,72 @@ function PDJ_Send(payload) {
         return;
     }
     ws.send(payload);
+}
+
+function stripHtml(text) {
+    return (text || "").replace(/<[^>]*>/g, "");
+}
+
+function guessQueuePersonName(queueItem) {
+    var plain = stripHtml(queueItem || "").trim();
+    if (!plain) return "";
+    plain = plain.replace(/^@/, "");
+    var firstToken = plain.split(/\s+/)[0] || "";
+    if (firstToken.indexOf("|") >= 0) {
+        var parts = firstToken.split("|");
+        return (parts[parts.length - 1] || "").trim();
+    }
+    return firstToken.trim();
+}
+
+function markItemAsPending(queueItem) {
+    if (!queueItem) return queueItem;
+    var marked = queueItem.replace("<span>", '<span class="pdj-confirm-pending">⏳待确认 ');
+    if (marked === queueItem) {
+        marked = '<span class="pdj-confirm-pending">⏳待确认 ' + queueItem + '</span>';
+    }
+    return marked;
+}
+
+function clearPendingConfirmTask() {
+    if (!pendingConfirmTask) return;
+    if (pendingConfirmTask.timerId) {
+        clearTimeout(pendingConfirmTask.timerId);
+    }
+    pendingConfirmTask = null;
+}
+
+function removeFirstQueueWithPendingClear() {
+    if (persons.length > 0) {
+        persons.splice(0, 1);
+    }
+    clearPendingConfirmTask();
+}
+
+function startDelFirstPendingConfirm() {
+    if (!persons.length) return;
+    clearPendingConfirmTask();
+    var originalItem = persons[0];
+    var pendingPerson = guessQueuePersonName(originalItem);
+    pendingConfirmTask = {
+        person: pendingPerson,
+        originalItem: originalItem,
+        startedAt: Date.now(),
+        timerId: setTimeout(function () {
+            if (!pendingConfirmTask) return;
+            var timeoutPerson = pendingConfirmTask.person || "该观众";
+            removeFirstQueueWithPendingClear();
+            PDJ_Send("@" + timeoutPerson + " 超时跳过");
+            console.log("[叫号确认]超时自动跳过:", timeoutPerson);
+        }, Math.max(1, Number(confirm_wait_seconds || 10)) * 1000)
+    };
+    persons[0] = markItemAsPending(originalItem);
+    if (pendingPerson) {
+        PDJ_Send("@" + pendingPerson + " 请在" + confirm_wait_seconds + "秒内回复“在/来了/好的”确认");
+    } else {
+        PDJ_Send("请第一位观众在" + confirm_wait_seconds + "秒内回复“在/来了/好的”确认");
+    }
+    console.log("[叫号确认]等待确认:", pendingPerson, "超时秒数:", confirm_wait_seconds);
 }
 
 function ws_zbtool_open(){
@@ -465,7 +533,11 @@ function op_quanxian(message){
                     var GuoLv_MSG = message.replace(/[\d\s]+/g,"");//删除数字和空格
                     if(GuoLv_MSG =="del"||GuoLv_MSG =="删除"||GuoLv_MSG =="完成"){
                         if(dindex!=""&&persons.length>=dindex&&persons.length>0){
-                            persons.splice(dindex-1,1);
+                            if(Number(dindex) === 1){
+                                startDelFirstPendingConfirm();
+                            }else{
+                                persons.splice(dindex-1,1);
+                            }
                         };
                     };
                     if (guanli_fankui = true){
@@ -656,6 +728,18 @@ function op_quanxian(message){
                         };
                 };
 
+                //设置叫号确认时间
+                var Set_confirm_time_Index = message.indexOf("设置确认时间");
+                if(Set_confirm_time_Index >= 0){
+                    var Set_confirm_time_QAQ = message.replace(/[^0-9]/ig,"");//除了数字 全部删除
+                    var Set_confirm_time_MSG = message.replace(/[\d\s]+/g,"");//删除数字和空格
+                    if(Set_confirm_time_MSG == "设置确认时间" && Set_confirm_time_QAQ != ""){
+                        confirm_wait_seconds = Math.max(3, Number(Set_confirm_time_QAQ));
+                        PDJ_Send("Set ConfirmTime =" + confirm_wait_seconds);
+                        console.log("[功能]叫号确认时间调整为",confirm_wait_seconds,"秒");
+                    };
+                };
+
 }
 
 function consolelogprint(kind = 1,person = "",message = ""){
@@ -701,6 +785,19 @@ function jsontoprint(data) {
             var jianZ_inIdex = jianzhang.indexOf(person);//查找用户是不是 插件舰长
 
             var paidui_list_length = persons.length;//获取排队列表长度
+            var confirmWords = ["在","来了","好的","到","在的","我在","在呢"];
+            var normalizedMsg = (message || "").trim();
+
+            // 叫号确认：等待被叫到的第一位观众回复
+            if (pendingConfirmTask && pendingConfirmTask.person == person) {
+                if (confirmWords.indexOf(normalizedMsg) !== -1) {
+                    removeFirstQueueWithPendingClear();
+                    PDJ_Send("@" + person + " 已确认，开始服务");
+                    console.log("[叫号确认]确认成功:", person);
+                    document.getElementById('danmu').innerHTML=persons.join("");
+                    return;
+                }
+            }
             
             //找不到名字就是 -1,如果找到了,就直接return;
             if(ban_user_inIdex != -1){
