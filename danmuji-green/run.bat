@@ -1,3 +1,16 @@
 @echo off
-title BiliBili_Danmuji-2.7.0.5beta-%date%-%time%-%cd%
-openjdk-8-jre\bin\java -jar -Xms64m -Xmx128m BiliBili_Danmuji-2.7.0.5beta.jar --server.port=23333
+setlocal
+cd /d %~dp0
+
+if not exist danmu_server.exe (
+  echo [INFO] 未检测到 danmu_server.exe，开始构建...
+  go build -o danmu_server.exe .
+  if errorlevel 1 (
+    echo [ERROR] Go 构建失败，请确认已安装 Go 1.22+
+    pause
+    exit /b 1
+  )
+)
+
+title PDJ-Go-Danmu-%date%-%time%-%cd%
+danmu_server.exe
