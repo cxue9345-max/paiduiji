@@ -43,11 +43,14 @@ func main() {
 	)
 	authSvc := auth.NewService(st, client, cfg, logger)
 	h := handler.NewAuthHandler(authSvc, cfg.Debug)
+	liveClient := httpclient.NewBilibiliLiveClient(cfg.HTTPTimeout, cfg.UserAgent, cfg.Referer)
+	liveHandler := handler.NewLiveHandler(authSvc, liveClient)
 
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(requestLogMiddleware(logger))
 	h.Register(r)
+	liveHandler.Register(r)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
