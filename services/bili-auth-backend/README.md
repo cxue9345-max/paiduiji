@@ -96,6 +96,39 @@ curl "http://localhost:8080/api/auth/session/<session_id>"
 curl -X POST "http://localhost:8080/api/auth/logout/<session_id>"
 ```
 
+### 6) 直播主流程接口代理（新增）
+
+> 这些接口对应 `Bilibili_Danmuji_流程与接口整理.docx` 中“主流程必经/高频运行期”的关键调用，统一复用扫码拿到的会话 cookie。
+
+```bash
+# 房间初始化（短号转真实房间号）
+curl "http://localhost:8080/api/live/room/init?session_id=<session_id>&room_id=12345"
+
+# 房间公告/房间基础信息
+curl "http://localhost:8080/api/live/room/news?session_id=<session_id>&room_id=12345"
+
+# 获取弹幕 WebSocket host_list + token
+curl "http://localhost:8080/api/live/danmu/info?session_id=<session_id>&room_id=12345"
+
+# 获取用户在房间属性（含可发弹幕长度）
+curl "http://localhost:8080/api/live/room/info-by-user?session_id=<session_id>&room_id=12345"
+
+# 用户导航（wbi 相关）
+curl "http://localhost:8080/api/live/user/nav?session_id=<session_id>"
+
+# 粉丝统计
+curl "http://localhost:8080/api/live/relation/stat?session_id=<session_id>&vmid=<主播UID>"
+
+# 发送弹幕（统一发送出口）
+curl -X POST "http://localhost:8080/api/live/msg/send" \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"<session_id>","room_id":12345,"message":"测试弹幕"}'
+```
+
+注意：
+- 直播接口要求会话已通过扫码确认并且已捕获 cookie。
+- `msg/send` 依赖 cookie 中 `bili_jct`，缺失时会返回错误。
+
 ## 单元测试
 
 ```bash
