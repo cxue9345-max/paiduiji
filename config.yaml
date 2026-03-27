@@ -2,6 +2,15 @@
 # 如果本文件缺失，后端会自动使用内置 default_config.yaml
 # 如果某个参数格式错误/无效，仅该参数回退到内置默认值
 
+# PDJ 后端基础配置（services/backend 会读取这些键）
+listen_addr: ":9816"
+proxy_target: ""
+data_dir: "data"
+queue_dir: "data/queues"
+log_dir: "data/logs"
+log_level: "info"
+
+# B 站扫码后端配置（services/bili-auth-backend 会读取这些键）
 port: "8080"
 debug: false
 session_ttl: "180s"
