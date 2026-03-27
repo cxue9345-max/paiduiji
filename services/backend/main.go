@@ -353,7 +353,17 @@ func parseSimpleYAML(b []byte) AppConfig {
 
 func marshalSimpleYAML(cfg AppConfig) []byte {
 	cfg = normalizeConfig(cfg)
-	return []byte(fmt.Sprintf("listen_addr: %s\nproxy_target: %s\ndata_dir: %s\nqueue_dir: %s\nlog_dir: %s\nlog_level: %s\n", cfg.ListenAddr, cfg.ProxyTarget, cfg.DataDir, cfg.QueueDir, cfg.LogDir, cfg.LogLevel))
+	return []byte(fmt.Sprintf("listen_addr: %s\nproxy_target: %s\ndata_dir: %s\nqueue_dir: %s\nlog_dir: %s\nlog_level: %s\nroomid: %d\nuid: %d\ncookie: %s\nadmins: %s\nban_admins: %s\njianzhang: %s\nfankui: %t\nguanli_fankui: %t\npaidui_list_length_max: %d\njianzhangchadui: %t\njianzhang_cd_kind: %d\njianzhang_cd_cishu: %d\nfangguan_can_doing: %t\nall_suoyourenbukepaidui: %t\nyhbot_kaiguan: %t\nyhbotid: %s\nyhbot_msg_type: %s\nyhbot_webhook_token: %s\nws_zbtool_kaiguan: %t\nqywx_kaiguan: %t\nwx_webhook: %s\nonly_myfuns_paidui: %t\nliwu_chadui_kg: %t\nliwu_paidui_kg: %t\nliwu_chadui_kind: %d\nliwu_paidui_kind: %d\n",
+		cfg.ListenAddr, cfg.ProxyTarget, cfg.DataDir, cfg.QueueDir, cfg.LogDir, cfg.LogLevel,
+		cfg.Panel.RoomID, cfg.Panel.UID, cfg.Panel.Cookie,
+		joinCSV(cfg.MyJS.Admins), joinCSV(cfg.MyJS.BanAdmins), joinCSV(cfg.MyJS.Jianzhang),
+		cfg.MyJS.Fankui, cfg.MyJS.GuanliFankui, cfg.MyJS.PaiduiListLengthMax,
+		cfg.MyJS.Jianzhangchadui, cfg.MyJS.JianzhangCDKind, cfg.MyJS.JianzhangCDCishu,
+		cfg.MyJS.FangguanCanDoing, cfg.MyJS.AllSuoyourenbukepaidui, cfg.MyJS.YHbotKaiguan,
+		cfg.MyJS.YHbotID, cfg.MyJS.YHbotMsgType, cfg.MyJS.YHbotWebhookToken,
+		cfg.MyJS.WsZbtoolKaiguan, cfg.MyJS.QYWXKaiguan, cfg.MyJS.WXWebhook,
+		cfg.MyJS.OnlyMyfunsPaidui, cfg.MyJS.LiwuChaduiKg, cfg.MyJS.LiwuPaiduiKg,
+		cfg.MyJS.LiwuChaduiKind, cfg.MyJS.LiwuPaiduiKind))
 }
 
 // 日志级别映射 / Log level mapping.
@@ -456,17 +466,6 @@ func cleanupExpiredRunLogs(dir string, maxAge time.Duration) error {
 		}
 	}
 	return nil
-	return []byte(fmt.Sprintf("listen_addr: %s\nproxy_target: %s\ndata_dir: %s\nqueue_dir: %s\nlog_dir: %s\nroomid: %d\nuid: %d\ncookie: %s\nadmins: %s\nban_admins: %s\njianzhang: %s\nfankui: %t\nguanli_fankui: %t\npaidui_list_length_max: %d\njianzhangchadui: %t\njianzhang_cd_kind: %d\njianzhang_cd_cishu: %d\nfangguan_can_doing: %t\nall_suoyourenbukepaidui: %t\nyhbot_kaiguan: %t\nyhbotid: %s\nyhbot_msg_type: %s\nyhbot_webhook_token: %s\nws_zbtool_kaiguan: %t\nqywx_kaiguan: %t\nwx_webhook: %s\nonly_myfuns_paidui: %t\nliwu_chadui_kg: %t\nliwu_paidui_kg: %t\nliwu_chadui_kind: %d\nliwu_paidui_kind: %d\n",
-		cfg.ListenAddr, cfg.ProxyTarget, cfg.DataDir, cfg.QueueDir, cfg.LogDir,
-		cfg.Panel.RoomID, cfg.Panel.UID, cfg.Panel.Cookie,
-		joinCSV(cfg.MyJS.Admins), joinCSV(cfg.MyJS.BanAdmins), joinCSV(cfg.MyJS.Jianzhang),
-		cfg.MyJS.Fankui, cfg.MyJS.GuanliFankui, cfg.MyJS.PaiduiListLengthMax,
-		cfg.MyJS.Jianzhangchadui, cfg.MyJS.JianzhangCDKind, cfg.MyJS.JianzhangCDCishu,
-		cfg.MyJS.FangguanCanDoing, cfg.MyJS.AllSuoyourenbukepaidui, cfg.MyJS.YHbotKaiguan,
-		cfg.MyJS.YHbotID, cfg.MyJS.YHbotMsgType, cfg.MyJS.YHbotWebhookToken,
-		cfg.MyJS.WsZbtoolKaiguan, cfg.MyJS.QYWXKaiguan, cfg.MyJS.WXWebhook,
-		cfg.MyJS.OnlyMyfunsPaidui, cfg.MyJS.LiwuChaduiKg, cfg.MyJS.LiwuPaiduiKg,
-		cfg.MyJS.LiwuChaduiKind, cfg.MyJS.LiwuPaiduiKind))
 }
 
 func parseBool(val string, fallback bool) bool {
