@@ -34,6 +34,8 @@ const (
 	configFileName    = "config.yaml"
 	dateTimeLayout    = "2006-01-02 15:04:05"
 	monthFileLayout   = "2006_01"
+	runLogNameLayout  = "06-01-02-15-04-05"
+	runLogFolder      = "log"
 )
 
 type AppConfig struct {
@@ -42,6 +44,7 @@ type AppConfig struct {
 	DataDir     string
 	QueueDir    string
 	LogDir      string
+	LogLevel    string
 	Panel       PanelConfig
 	MyJS        MyJSConfig
 }
@@ -130,12 +133,17 @@ type Server struct {
 	staticDir string
 }
 
+var activeRunLogFilter *levelFilterWriter
+
 func main() {
 	cfgMgr, err := NewConfigManager(resolveConfigPath())
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 	cfg := cfgMgr.Get()
+	if err := setupRunLogger(cfg.LogLevel); err != nil {
+		log.Fatalf("初始化运行日志失败: %v", err)
+	}
 
 	store, err := NewQueueStore(cfg)
 	if err != nil {
@@ -213,6 +221,7 @@ func DefaultConfig() AppConfig {
 		DataDir:    "data",
 		QueueDir:   "data/queues",
 		LogDir:     "data/logs",
+		LogLevel:   "info",
 		Panel: PanelConfig{
 			RoomID: 0,
 			UID:    0,
@@ -245,6 +254,7 @@ func normalizeConfig(cfg AppConfig) AppConfig {
 	if strings.TrimSpace(cfg.LogDir) == "" {
 		cfg.LogDir = filepath.Join(cfg.DataDir, "logs")
 	}
+	cfg.LogLevel = normalizeLogLevel(cfg.LogLevel)
 	cfg.ProxyTarget = strings.TrimSpace(cfg.ProxyTarget)
 	return cfg
 }
@@ -275,6 +285,8 @@ func parseSimpleYAML(b []byte) AppConfig {
 			cfg.QueueDir = v
 		case "log_dir":
 			cfg.LogDir = v
+		case "log_level":
+			cfg.LogLevel = v
 		case "roomid":
 			if n, err := strconv.Atoi(v); err == nil {
 				cfg.Panel.RoomID = n
@@ -338,6 +350,109 @@ func parseSimpleYAML(b []byte) AppConfig {
 
 func marshalSimpleYAML(cfg AppConfig) []byte {
 	cfg = normalizeConfig(cfg)
+	return []byte(fmt.Sprintf("listen_addr: %s\nproxy_target: %s\ndata_dir: %s\nqueue_dir: %s\nlog_dir: %s\nlog_level: %s\n", cfg.ListenAddr, cfg.ProxyTarget, cfg.DataDir, cfg.QueueDir, cfg.LogDir, cfg.LogLevel))
+}
+
+// 日志级别映射 / Log level mapping.
+var logLevelPriority = map[string]int{
+	"debug": 10,
+	"info":  20,
+	"warn":  30,
+	"error": 40,
+}
+
+func normalizeLogLevel(raw string) string {
+	level := strings.ToLower(strings.TrimSpace(raw))
+	if _, ok := logLevelPriority[level]; ok {
+		return level
+	}
+	return "info"
+}
+
+func shouldLog(level string, current string) bool {
+	return logLevelPriority[level] >= logLevelPriority[current]
+}
+
+// 级别日志输出 / Leveled log output.
+func logf(current, level, format string, args ...any) {
+	if !shouldLog(level, current) {
+		return
+	}
+	log.Printf("["+strings.ToUpper(level)+"] "+format, args...)
+}
+
+func setupRunLogger(configLevel string) error {
+	level := normalizeLogLevel(configLevel)
+	if err := os.MkdirAll(runLogFolder, 0o755); err != nil {
+		return err
+	}
+	if err := cleanupExpiredRunLogs(runLogFolder, 30*24*time.Hour); err != nil {
+		return err
+	}
+	logFile := filepath.Join(runLogFolder, "pdj-"+time.Now().Format(runLogNameLayout)+".log")
+	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	log.SetOutput(io.MultiWriter(os.Stdout, f))
+	log.Printf("[INFO] 运行日志已启用，等级=%s, 文件=%s", level, logFile)
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	log.SetPrefix("")
+	activeRunLogFilter = &levelFilterWriter{
+		level:  level,
+		writer: io.MultiWriter(os.Stdout, f),
+	}
+	log.SetOutput(activeRunLogFilter)
+	return nil
+}
+
+type levelFilterWriter struct {
+	level  string
+	writer io.Writer
+}
+
+func (w *levelFilterWriter) Write(p []byte) (n int, err error) {
+	msg := string(p)
+	matchedLevel := ""
+	for level := range logLevelPriority {
+		tag := "[" + strings.ToUpper(level) + "]"
+		if strings.Contains(msg, tag) {
+			matchedLevel = level
+			break
+		}
+	}
+	if matchedLevel == "" {
+		matchedLevel = "info"
+	}
+	if !shouldLog(matchedLevel, w.level) {
+		return len(p), nil
+	}
+	return w.writer.Write(p)
+}
+
+func cleanupExpiredRunLogs(dir string, maxAge time.Duration) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	expireAt := time.Now().Add(-maxAge)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, "pdj-") || !strings.HasSuffix(name, ".log") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(expireAt) {
+			_ = os.Remove(filepath.Join(dir, name))
+		}
+	}
+	return nil
 	return []byte(fmt.Sprintf("listen_addr: %s\nproxy_target: %s\ndata_dir: %s\nqueue_dir: %s\nlog_dir: %s\nroomid: %d\nuid: %d\ncookie: %s\nadmins: %s\nban_admins: %s\njianzhang: %s\nfankui: %t\nguanli_fankui: %t\npaidui_list_length_max: %d\njianzhangchadui: %t\njianzhang_cd_kind: %d\njianzhang_cd_cishu: %d\nfangguan_can_doing: %t\nall_suoyourenbukepaidui: %t\nyhbot_kaiguan: %t\nyhbotid: %s\nyhbot_msg_type: %s\nyhbot_webhook_token: %s\nws_zbtool_kaiguan: %t\nqywx_kaiguan: %t\nwx_webhook: %s\nonly_myfuns_paidui: %t\nliwu_chadui_kg: %t\nliwu_paidui_kg: %t\nliwu_chadui_kind: %d\nliwu_paidui_kind: %d\n",
 		cfg.ListenAddr, cfg.ProxyTarget, cfg.DataDir, cfg.QueueDir, cfg.LogDir,
 		cfg.Panel.RoomID, cfg.Panel.UID, cfg.Panel.Cookie,
@@ -718,6 +833,9 @@ func (s *Server) watchConfigLoop() {
 			s.proxyMgr.Update(cfg.ProxyTarget)
 			if err := s.store.UpdatePaths(cfg); err != nil {
 				log.Printf("更新路径失败: %v", err)
+			}
+			if activeRunLogFilter != nil {
+				activeRunLogFilter.level = normalizeLogLevel(cfg.LogLevel)
 			}
 		}
 	}
