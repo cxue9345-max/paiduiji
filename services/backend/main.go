@@ -172,6 +172,9 @@ func main() {
 	mux.HandleFunc("/b", s.handleQueueBoard)
 
 	log.Printf("服务启动: http://%s", cfg.ListenAddr)
+	if strings.TrimSpace(cfg.ProxyTarget) != "" {
+		log.Printf("已启用 index 反向代理: / 与 /index.html -> %s", cfg.ProxyTarget)
+	}
 	if err := http.ListenAndServe(cfg.ListenAddr, mux); err != nil {
 		log.Fatalf("服务异常: %v", err)
 	}
@@ -853,6 +856,11 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/config") || strings.HasPrefix(r.URL.Path, "/b") {
 		http.NotFound(w, r)
 		return
+	}
+	if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+		if s.proxyMgr.ServeHTTP(w, r) {
+			return
+		}
 	}
 	s.static.ServeHTTP(w, r)
 }
